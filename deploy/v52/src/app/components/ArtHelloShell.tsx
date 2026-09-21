@@ -530,7 +530,7 @@ export default function ArtHelloShell({ displayName: displayNameOverride = "" }:
           ) : routedActive === "sales" ? (
             <SalesWorkspace workspace="sales" role={role} notify={setNotice} onTasksChanged={loadTasks} onOpenFinance={() => openModule("finance")} onOpenIntegrations={() => openModule("integrations")} focusId={moduleFocus?.module === "sales" ? moduleFocus.id : undefined} />
           ) : routedActive === "clients" ? (
-            <div className="family-workspace"><FamilyWorkspace notify={setNotice} onOpenIntegrations={() => openModule("integrations")} onNavigate={(module, focusId) => openModule(module, focusId)} /></div>
+            <div className="family-workspace"><FamilyWorkspace canArchive={Boolean(authenticatedUser?.isSystemOwner || ["DIRECTOR","ADMIN","SALES"].includes(authenticatedUser?.apiRole ?? ""))} notify={setNotice} onOpenIntegrations={() => openModule("integrations")} onNavigate={(module, focusId) => openModule(module, focusId)} /></div>
           ) : routedActive === "content" ? (
             <ContentWorkspace role={role} notify={setNotice} onTasksChanged={loadTasks} onOpenSales={() => openModule("sales")} onOpenFinance={() => openModule("finance")} onOpenIntegrations={() => openModule("integrations")} />
           ) : routedActive === "education" || routedActive === "methods" ? (

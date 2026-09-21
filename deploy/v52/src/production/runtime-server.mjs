@@ -1,5 +1,6 @@
 import { randomBytes } from 'node:crypto';
 import { startTochkaAutosyncTimer } from './tochka-autosync-timer.mjs';
+import { startAlfaAutosyncTimer } from './alfacrm-autosync-timer.mjs';
 // TOCHKA_AUTOMATIC_READONLY_V1
 import { Miniflare, Log, LogLevel } from "miniflare";
 import { readFileSync } from "node:fs";
@@ -33,6 +34,8 @@ if (integrationCredentialsKey.length < 32) {
 
 const tochkaAutosyncEnabled = process.env.TOCHKA_AUTOSYNC_ENABLED === '1';
 const tochkaAutosyncSecret = tochkaAutosyncEnabled ? randomBytes(32).toString('hex') : '';
+const alfaAutosyncEnabled = process.env.ALFACRM_AUTOSYNC_ENABLED === '1';
+const alfaAutosyncSecret = alfaAutosyncEnabled ? randomBytes(32).toString('hex') : '';
 
 const runtime = new Miniflare({
   host: "0.0.0.0",
@@ -75,6 +78,7 @@ const runtime = new Miniflare({
     TBANK_EGRESS_IP: process.env.TBANK_EGRESS_IP || "",
     TOCHKA_AUTOSYNC_SECRET: tochkaAutosyncSecret,
     ALFACRM_IMPORT_ENABLED: process.env.ALFACRM_IMPORT_ENABLED || "",
+    ALFACRM_AUTOSYNC_SECRET: alfaAutosyncSecret,
   },
   serviceBindings: {
     TOCHKA_TRANSPORT: createTochkaTransport(),
@@ -124,9 +128,11 @@ const url = await runtime.ready;
 console.log(`ARTHELLO_NEW_UI_READY=${url}`);
 
 const tochkaAutosyncTimer = startTochkaAutosyncTimer({ runtime, secret: tochkaAutosyncSecret, publicOrigin, enabled: tochkaAutosyncEnabled, releaseSha: process.env.RELEASE_SHA || "", activationId: process.env.TOCHKA_AUTOSYNC_ACTIVATION_ID || "" });
+const alfaAutosyncTimer = startAlfaAutosyncTimer({ runtime, secret: alfaAutosyncSecret, publicOrigin, enabled: alfaAutosyncEnabled });
 
 async function shutdown() {
   tochkaAutosyncTimer.stop();
+  alfaAutosyncTimer.stop();
   await runtime.dispose();
   process.exit(0);
 }

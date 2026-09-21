@@ -33,6 +33,7 @@ export async function GET(request: Request) {
       type: type && entityTypeSet.has(type) ? type : "",
       q,
       quality,
+      status: url.searchParams.get("status") === "archive" ? "archive" : url.searchParams.get("status") === "all" ? "all" : "current",
       review,
       mode,
       offset,
@@ -119,6 +120,7 @@ export async function PATCH(request: Request) {
     const db = getDb();
     const [current] = await db.select().from(entities).where(eq(entities.id, id)).limit(1);
     if (!current) return Response.json({ error: "Карточка не найдена" }, { status: 404 });
+    if (current.entityType === "Семья" && status !== current.status) return Response.json({ error: "Архивируйте или восстанавливайте семью в разделе Клиенты и семьи" }, { status: 409 });
     if (current.status === "Объединена") return Response.json({ error: "Объединённую карточку нельзя редактировать" }, { status: 409 });
     if (!new Set(["Активна", "Архив", "На проверке", current.status]).has(status)) return Response.json({ error: "Некорректный статус" }, { status: 400 });
     const possibleDuplicates = await db.select({ id: entities.id, displayName: entities.displayName }).from(entities).where(and(

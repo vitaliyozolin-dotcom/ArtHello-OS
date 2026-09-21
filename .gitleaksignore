@@ -1,5 +1,7 @@
 # Deterministic candidate fixtures removed from the current tree.
 # Keep these ignores scoped to the exact historical commit, path, rule and line.
+# Synthetic HMAC fixture used only with intercepted fetch to school.test; replaced by repeated characters.
+3edbda824018d85df64f1a8faae3501b66b58f53:deploy/v52/src/tests/alfacrm-lifecycle.test.mjs:generic-api-key:362
 345b04df1b66693117c1ffe4cfb1944afee0b0b0:.github/workflows/school-identity-broker-candidate-v2.yml:generic-api-key:25
 345b04df1b66693117c1ffe4cfb1944afee0b0b0:.github/workflows/school-identity-broker-candidate-v2.yml:generic-api-key:26
 345b04df1b66693117c1ffe4cfb1944afee0b0b0:.github/workflows/school-identity-broker-candidate-v2.yml:generic-api-key:27

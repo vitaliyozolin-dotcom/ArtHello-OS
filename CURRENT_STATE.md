@@ -1,5 +1,10 @@
 # ArtHello OS — Current State
 
+## 2026-09-15 — D189: единая идентификация, кандидат
+
+Основной ID сохраняет подтверждённые ссылки старых карточек и несколько филиальных назначений. Повторный импорт, архив и учебные привязки используют единый корень; слабые совпадения не объединяют людей. Автоматическое подтверждение — только один ID объекта AlfaCRM с взаимно подтверждёнными филиалами. Production ещё не изменён; оба живых дневника повторно проверены, учеников по-прежнему 0. Доказательства: `docs/acceptance/2026-09-15-d189-unified-identity.md`.
+
+
 - Historical R12–R17 verification is no longer an automatic PR/main gate.
   `verify-arthello-r14.yml` remains available through `workflow_dispatch` as a
   forensic entrypoint because frozen recovery validators still read its exact
@@ -612,3 +617,11 @@ D184 exact main `d776bd2f46c763cec7f71479125b60bdf68bbe28` прошёл Quality 
 D185 exact main `cffd14d2723f95871349a2839756e386e922e293` прошёл Quality `34833131361`, Proof `34833131281` и v52 verification `34833131276`. Protected run `34833717081/103943267204` показал тот же `unable to open database file` даже для root reader; rollback запустил прежний Atlas до остановки central и route swap, D185 receipt не создан. Atlas использует WAL, поэтому plain copy только main-файла не переносит потенциально отдельный committed WAL и не является самостоятельной read-only SQLite backup.
 
 D186 после остановки Atlas копирует стабильные main+WAL из исходного data volume `:ro` только в одноразовый tmpfs, штатным Node backup API создаёт standalone backup, переводит его в `journal_mode=DELETE`, проверяет целостность и атомарно публикует без перезаписи. Hosted regression сохраняет committed WAL row и читает её из финального read-only backup. Семьи, классы и ученики остаются не подключены до отдельной центральной проекции.
+
+## 2026-09-15 — D187 AlfaCRM automatic refresh candidate
+
+Added a server timer, persisted cycle/backoff, owner-controlled modules and scope, and visible last-success/next-step status. It reuses the staged importer and its identity/lineage gates. Re-import preserves local metadata and verified quality when source-owned fields are unchanged. No production activation is claimed. The observed AlfaCRM branch-data mismatch must be reconciled before activation. Both diary directories remain separately unpopulated with pupils; AlfaCRM scheduling does not resolve central-access outbox delivery.
+
+### 2026-09-15 — D188, кандидат исправления филиалов AlfaCRM
+
+Найдено: importer доверял филиалу URL без `branch_ids` записи, список семей включал архив, `teacher_ids` групп не читался, Docker image D187 не включал импортируемый файл таймера. Подготовлены проверка принадлежности, повторная сверка с архивированием ошибочных проекций, обратимый ручной архив и отчёт по источнику. Лист2 остаётся источником расписания с 01.09.2026. Число действующих семей не подтверждено свежей выгрузкой. После обновления страниц в обоих дневниках: 1–11 — 6 классов, 0 учеников, 13 педагогических позиций; Атлас — 0/0/0. Production пока не изменён. Подробности: `docs/acceptance/2026-09-15-d188-alfa-branch-archive.md`.

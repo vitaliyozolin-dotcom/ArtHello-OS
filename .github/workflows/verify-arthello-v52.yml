@@ -213,6 +213,90 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  diary-directory-images:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - diary: atlas
+            source: fdd8316ce50962476dbfee446181ca6c9d71fcc8
+            tree: f590f1f7d7cc838025762acc5e6eb0fb3afe0f84
+            system: SYS-SCHOOL-ATLAS
+            branch: BR-ATLAS-SCHOOL
+          - diary: school
+            source: e9a2a92edbd150dfeaa4b566a206e6bbb00169ad
+            tree: 2968837fc2d9fc3124fb10efb59e7607c1ea8e0c
+            system: SYS-SCHOOL-1-11
+            branch: BR-SCHOOL
+    env:
+      CHECKED_SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+      DIARY_SOURCE: ${{ matrix.source }}
+      DIARY_TREE: ${{ matrix.tree }}
+      DIARY_NAME: ${{ matrix.diary }}
+      SMOKE_SYSTEM_ID: ${{ matrix.system }}
+      SMOKE_BRANCH_ID: ${{ matrix.branch }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ env.CHECKED_SOURCE_SHA }}
+          path: controller
+          persist-credentials: false
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ matrix.source }}
+          path: diary
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 24
+      - name: Verify exact source and receiver regressions
+        run: |
+          set -Eeuo pipefail
+          test "$(git -C controller rev-parse HEAD)" = "$CHECKED_SOURCE_SHA"
+          test "$(git -C diary rev-parse HEAD)" = "$DIARY_SOURCE"
+          test "$(git -C diary rev-parse HEAD^{tree})" = "$DIARY_TREE"
+          node --test controller/scripts/test/diary-release-smoke.test.mjs
+          (cd diary && node --test tests/directory-snapshot.test.mjs tests/central-family-directory.test.mjs)
+      - name: Build and verify isolated directory image
+        run: |
+          set -Eeuo pipefail
+          tag="arthello-directory-$DIARY_NAME:$DIARY_SOURCE"
+          docker build --label "org.opencontainers.image.revision=$DIARY_SOURCE" --label "org.opencontainers.image.source-tree=$DIARY_TREE" --tag "$tag" diary
+          container="directory-ci-$DIARY_NAME-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          cleanup() { docker rm -f "$container" >/dev/null 2>&1 || true; }
+          trap cleanup EXIT
+          synthetic_key="$(node -e "process.stdout.write('s'.repeat(40))")"
+          docker run -d --name "$container" --network none --read-only \
+            --tmpfs /tmp:rw,uid=1001,gid=1001 --tmpfs /data:rw,uid=1001,gid=1001 --tmpfs /backups:rw,uid=1001,gid=1001 \
+            --entrypoint node --env DATABASE_PATH=/data/isolated-ci.sqlite \
+            --env PUBLIC_APP_ORIGIN=http://127.0.0.1:3000 --env ARTHELLO_PUBLIC_ORIGIN=https://central.test \
+            --env CENTRAL_ACCESS_SECRET="$synthetic_key" --env PASSWORDLESS_PEPPER="$synthetic_key" \
+            --env SMOKE_SYSTEM_ID --env SMOKE_BRANCH_ID \
+            --mount "type=bind,src=$GITHUB_WORKSPACE/controller/deploy/diary-directory-smoke.mjs,dst=/run/directory-smoke.mjs,readonly" \
+            "$tag" server.js
+          ready=0
+          for attempt in $(seq 1 40); do
+            if docker exec "$container" node -e "fetch('http://127.0.0.1:3000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"; then ready=1; break; fi
+            sleep 2
+          done
+          test "$ready" = 1
+          docker exec "$container" node /run/directory-smoke.mjs
+          docker exec "$container" node --input-type=module -e "import {DatabaseSync} from 'node:sqlite'; const db=new DatabaseSync('/data/isolated-ci.sqlite',{readOnly:true}); const row=db.prepare(\"SELECT count(*) n FROM students WHERE id='CI-C1' AND status='archived'\").get(); if(row.n!==1) throw Error('pupil projection'); if(db.prepare(\"SELECT count(*) n FROM central_directory_links WHERE kind='student'\").get().n!==1) throw Error('duplicate identity'); if(db.prepare('PRAGMA integrity_check').get().integrity_check!=='ok') throw Error('integrity'); db.close();"
+          mkdir -p "$RUNNER_TEMP/directory-bundle"
+          docker save "$tag" | gzip -1 -n > "$RUNNER_TEMP/directory-bundle/image.tar.gz"
+          fingerprint="$(docker image inspect "$tag" | jq -cS -f controller/deploy/v52/maintenance/image-runtime-fingerprint.jq | sha256sum | cut -d ' ' -f 1)"
+          jq -n --arg source "$DIARY_SOURCE" --arg tree "$DIARY_TREE" --arg controller "$CHECKED_SOURCE_SHA" --arg diary "$DIARY_NAME" --arg fingerprint "$fingerprint" --arg run "$GITHUB_RUN_ID" \
+            '{schemaVersion:1,sourceSha:$source,sourceTree:$tree,controllerSha:$controller,diary:$diary,runtimeFingerprintSha256:$fingerprint,runId:$run,isolatedDirectorySmoke:"verified",productionApplied:false}' > "$RUNNER_TEMP/directory-bundle/receipt.json"
+          (cd "$RUNNER_TEMP/directory-bundle" && sha256sum image.tar.gz receipt.json > checksums.sha256)
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: diary-directory-${{ matrix.diary }}-${{ github.run_id }}
+          path: ${{ runner.temp }}/directory-bundle/
+          if-no-files-found: error
+          retention-days: 7
+
   verify-v52:
     name: verify-v52
     runs-on: ubuntu-latest
