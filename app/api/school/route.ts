@@ -179,6 +179,7 @@ const ACADEMIC_CALENDAR_PERIODS = [
 ] as const;
 
 const SCHOOL_SUBJECTS = [
+  { id: "biology", name: "Биология", shortName: "Биология", color: "#5a9b4c", icon: "Б", stage: "6" },
   {
     id: "math",
     name: "Математика",
@@ -606,7 +607,7 @@ async function ensureSchoolStructure() {
         .bind(period.id, ACADEMIC_YEAR.id, period.title, period.startsOn, period.endsOn),
     ),
     db.prepare(
-      "UPDATE subjects SET status = 'archived', updated_at = CURRENT_TIMESTAMP WHERE id IN ('algebra', 'geometry', 'social', 'physics', 'chemistry', 'biology')",
+      "UPDATE subjects SET status = 'archived', updated_at = CURRENT_TIMESTAMP WHERE id IN ('algebra', 'geometry', 'social', 'physics', 'chemistry')",
     ),
     db.prepare(
       "UPDATE users SET status = 'archived', profile_status = 'demo', notes = 'Архивная тестовая запись' WHERE id IN ('user-admin-demo', 'user-parent-demo', 'user-teacher-demo', 'user-student-demo')",
@@ -1121,9 +1122,9 @@ async function loadSnapshot(
     : viewer.role === "methodist"
       ? await rows<SchoolSnapshot["users"][number]>(
           `SELECT id, '' AS email, display_name AS displayName, role,
-          NULL AS linkedStudentId, status, profile_status AS profileStatus,
+          NULL AS linkedStudentId, status, profile_status AS profileStatus, identity_source AS identitySource,
           '' AS notes
-          FROM users WHERE role = 'teacher' AND status = 'active'
+          FROM users WHERE role = 'teacher' AND status IN ('active','setup')
           ORDER BY display_name`,
         )
       : [];
