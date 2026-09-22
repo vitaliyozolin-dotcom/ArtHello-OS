@@ -233,13 +233,13 @@ jobs:
       matrix:
         include:
           - diary: atlas
-            source: 85fe73f7671cdc8908e40d43adde9b9c47faa3bf
-            tree: 3a6b1ac8e5adbcb002272e2ac200c360ca3cf50f
+            source: 21daada019ffebb6b8d30de48f268ed3163c6c3e
+            tree: 6d30fc7f3eb4504b3afeb203d2e93e85f83cac5c
             system: SYS-SCHOOL-ATLAS
             branch: BR-ATLAS-SCHOOL
           - diary: school
-            source: 1cf4000465f57e7a6aed9b952910b4ebd33a766c
-            tree: 4335d57ed1586454d6bd087f91f9ba29dad65f43
+            source: 5876accedbdf3758971fdc383f1e0fad8c32a158
+            tree: b1c9f99cae0b44a19a15cfe93a2ebb5de74c601b
             system: SYS-SCHOOL-1-11
             branch: BR-SCHOOL
     env:
