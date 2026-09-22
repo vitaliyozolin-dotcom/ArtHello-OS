@@ -624,9 +624,9 @@ test("DS-04 Tabs have one keyboard contract and one stable shared panel id", () 
   assert.ok(!normalizedTabs.includes("${option.id}-panel"), "Every tab must control the same stable panel id");
   assert.ok(!normalizedTabs.includes("${value}-panel"), "The panel id must not change when the selected tab changes");
 
-  assert.equal((schoolApp.match(/<Tabs\b/g) ?? []).length, 5);
-  assert.equal((schoolApp.match(/<TabPanel\b/g) ?? []).length, 5);
-  for (const id of ["ranking-metric", "study-view", "calendar-view", "school-life", "registration-mode"]) {
+  assert.equal((schoolApp.match(/<Tabs\b/g) ?? []).length, 6);
+  assert.equal((schoolApp.match(/<TabPanel\b/g) ?? []).length, 6);
+  for (const id of ["ranking-metric", "study-view", "calendar-view", "people-directory", "school-life", "registration-mode"]) {
     assert.ok(schoolApp.includes(`id="${id}"`), `Missing shared Tabs id: ${id}`);
     assert.ok(schoolApp.includes(`tabsId="${id}"`), `Missing matching TabPanel id: ${id}`);
   }

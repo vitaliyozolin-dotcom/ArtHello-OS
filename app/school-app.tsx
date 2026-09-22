@@ -2,7 +2,7 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type FormEvent, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { Icon, type IconName } from "./icons";
 import { roleLabels, type ActionKind, type Role, type SchoolSnapshot } from "./level-zero-types";
@@ -442,6 +442,7 @@ function AppShell({ snapshot, activeView, onView, onStudent, helpAction, helpOve
         <section className="l0-workspace">
           <header className="l0-topbar">
             <div className="mobile-brand"><Image src="/school-logo.svg" alt="" width={36} height={36} /><strong>1–11</strong></div>
+            <Link className="return-to-arthello" href="/api/auth/return-to-arthello" aria-label="Вернуться в ArtHello OS" title="Вернуться в ArtHello OS"><Icon name="back" size={17} /><span>Вернуться в ArtHello OS</span></Link>
             <div className="topbar-spacer" />
             {snapshot.students.length > 1 && snapshot.viewer.role === "parent" ? (
               <label className="compact-select"><span>Ребёнок</span><select value={snapshot.selectedStudent?.id ?? ""} onChange={(event) => onStudent(event.target.value)}>{snapshot.students.map((student) => <option key={student.id} value={student.id}>{student.firstName} · {student.className}</option>)}</select></label>
@@ -476,13 +477,13 @@ const staffStatusMeta: Record<string, { label: string; tone: "good" | "warn" | "
 };
 
 function StaffDirectory({ snapshot }: { snapshot: SchoolSnapshot }) {
-  const teachers = snapshot.users.filter((user) => user.role === "teacher" && user.profileStatus !== "demo");
+  const teachers = snapshot.users.filter((user) => user.role === "teacher" && user.status !== "archived" && user.profileStatus !== "demo");
   return <div className="staff-directory">{teachers.map((teacher) => {
     const assignments = snapshot.teacherAssignments.filter((item) => item.teacherUserId === teacher.id);
     const classes = [...new Set(assignments.map((item) => item.className))].sort((a, b) => Number(a) - Number(b));
     const subjects = [...new Set(assignments.map((item) => item.subjectName))];
-    const meta = staffStatusMeta[teacher.profileStatus] ?? staffStatusMeta.confirmed;
-    return <article key={teacher.id} className="staff-card"><div className="staff-card-head"><Avatar name={teacher.displayName} size="sm" /><div><strong>{teacher.displayName}</strong><small>{teacher.notes}</small></div><StatusPill tone={meta.tone}>{meta.label}</StatusPill></div><div className="staff-tags"><span>{classes.length === 6 ? "1–6 классы" : `${classes.join(", ")} классы`}</span>{subjects.map((subject) => <span key={subject}>{subject}</span>)}</div></article>;
+    const meta = teacher.identitySource === "central_directory" && teacher.profileStatus === "unconfirmed" ? { label: "Назначения не подтверждены", tone: "warn" as const } : staffStatusMeta[teacher.profileStatus] ?? staffStatusMeta.unconfirmed;
+    return <article key={teacher.id} className="staff-card"><div className="staff-card-head"><Avatar name={teacher.displayName} size="sm" /><div><strong>{teacher.displayName}</strong><small>{teacher.notes}</small></div><StatusPill tone={meta.tone}>{meta.label}</StatusPill></div><div className="staff-tags"><span>{classes.length === 0 ? "Классы не назначены" : classes.length === 6 ? "1–6 классы" : `${classes.join(", ")} классы`}</span>{subjects.map((subject) => <span key={subject}>{subject}</span>)}</div></article>;
   })}</div>;
 }
 
@@ -593,7 +594,7 @@ function TeacherDashboard({ snapshot, openAction, onView }: { snapshot: SchoolSn
 }
 
 function LeadershipDashboard({ snapshot, onView }: { snapshot: SchoolSnapshot; onView: (view: View) => void }) {
-  const staff = snapshot.users.filter((user) => user.role === "teacher" && user.profileStatus !== "demo");
+  const staff = snapshot.users.filter((user) => user.role === "teacher" && user.status !== "archived" && user.profileStatus !== "demo");
   const unresolvedStaff = staff.filter((user) => user.profileStatus !== "confirmed");
   const todayLessons = snapshot.lessons.filter((lesson) => lesson.weekday === todayWeekday());
   const unread = snapshot.messages.filter((message) => !message.readAt && message.authorUserId !== snapshot.viewer.id).length;
@@ -830,13 +831,80 @@ function ProgramsPage({ snapshot, openAction }: { snapshot: SchoolSnapshot; open
   </div>;
 }
 
-function PeoplePage({ snapshot, onView }: { snapshot: SchoolSnapshot; openAction: (kind: ActionKind, preset?: Record<string, string>) => void; onView: (view: View) => void }) {
+function StudentProfile({ student, snapshot, close }: { student: SchoolSnapshot["students"][number]; snapshot: SchoolSnapshot; close: () => void }) {
+  const closeButton = useRef<HTMLButtonElement>(null);
+  const dialog = useRef<HTMLElement>(null);
+  useEffect(() => {
+    const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    closeButton.current?.focus();
+    return () => { if (previous?.isConnected) previous.focus(); };
+  }, []);
+  const grades = snapshot.grades.filter((grade) => grade.studentId === student.id);
+  const subjects = [...new Set(grades.map((grade) => grade.subjectId))].map((id) => {
+    const subjectGrades = grades.filter((grade) => grade.subjectId === id);
+    return { id, name: subjectGrades[0].subjectName, average: weightedAverage(subjectGrades), count: subjectGrades.length };
+  }).sort((left, right) => left.name.localeCompare(right.name, "ru"));
+  const homeroom = snapshot.classes.find((item) => item.name === student.className)?.homeroomTeacherName;
+  const onKeyDown = (event: ReactKeyboardEvent<HTMLElement>) => {
+    if (event.key === "Escape") { event.preventDefault(); close(); return; }
+    if (event.key !== "Tab") return;
+    const focusable = Array.from(dialog.current?.querySelectorAll<HTMLElement>('button:not(:disabled), a[href], [tabindex]:not([tabindex="-1"])') ?? []);
+    if (!focusable.length) return;
+    if (event.shiftKey && document.activeElement === focusable[0]) { event.preventDefault(); focusable.at(-1)?.focus(); }
+    else if (!event.shiftKey && document.activeElement === focusable.at(-1)) { event.preventDefault(); focusable[0].focus(); }
+  };
+  return <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) close(); }}>
+    <section ref={dialog} className="action-modal student-profile-modal" role="dialog" aria-modal="true" aria-labelledby="student-profile-title" onKeyDown={onKeyDown}>
+      <header><div><span className="eyebrow">Карточка ученика</span><h2 id="student-profile-title">{student.fullName}</h2></div><button ref={closeButton} type="button" onClick={close} aria-label="Закрыть карточку ученика"><Icon name="close" /></button></header>
+      <div className="student-profile-body">
+        <div className="student-profile-identity"><Avatar name={student.fullName} color={student.avatarColor} size="lg" /><div><strong>{student.fullName}</strong><span>{student.className} класс · {snapshot.school.academicYear} учебный год</span></div></div>
+        <dl className="student-profile-facts">
+          <div><dt>Класс</dt><dd>{student.className}</dd></div>
+          <div><dt>Классный руководитель</dt><dd>{homeroom ?? "Не назначен"}</dd></div>
+          <div><dt>Средняя оценка</dt><dd>{weightedAverage(grades)}</dd></div>
+          <div><dt>День рождения</dt><dd>Дата не указана</dd></div>
+          <div><dt>Год рождения</dt><dd>{student.birthYear ?? "Не указан"}</dd></div>
+          <div><dt>Родители с подтверждённой связью</dt><dd>{student.parentNames?.length ? student.parentNames.join(", ") : "Пока не указаны"}</dd></div>
+        </dl>
+        <section className="student-profile-section"><h3>Успеваемость по предметам</h3>
+          {subjects.length ? <div className="student-profile-subjects">{subjects.map((subject) => <div key={subject.id}><span>{subject.name}</span><strong>{subject.average}</strong><small>{subject.count} оценок</small></div>)}</div> : <p className="student-profile-empty">Оценок пока нет. Средний балл появится после первой оценки.</p>}
+        </section>
+        <section className="student-profile-section"><h3>Последние оценки</h3>
+          {grades.length ? <div className="student-profile-grades">{grades.slice(0, 5).map((grade) => <div key={grade.id}><span className={cn("grade-value", `grade-${grade.value}`)}>{grade.value}</span><div><strong>{grade.subjectName}</strong><small>{grade.title} · {formatDate(grade.gradeDate)}{grade.weight > 1 ? ` · вес ${grade.weight}` : ""}</small></div></div>)}</div> : <p className="student-profile-empty">Оценок пока нет.</p>}
+        </section>
+      </div>
+    </section>
+  </div>;
+}
+
+function PeoplePage({ snapshot }: { snapshot: SchoolSnapshot }) {
   const operational = snapshot.viewer.role === "director" || snapshot.viewer.role === "deputy" || snapshot.viewer.role === "admin";
+  const [directoryTab, setDirectoryTab] = useState<"students" | "classes" | "teachers">("students");
+  const [classFilter, setClassFilter] = useState<string>("all");
+  const [selectedStudentId, setSelectedStudentId] = useState<string | null>(null);
   if (!operational) {
-    return <div className="page-shell"><div className="page-heading"><div><span className="eyebrow">{snapshot.viewer.role === "teacher" ? "Назначенные классы" : "Семья"}</span><h1>{snapshot.viewer.role === "teacher" ? "Мои классы и ученики" : "Мои дети"}</h1><p>Только разрешённые карточки без доступа к чужим данным</p></div></div><section className="student-directory">{snapshot.students.map((student) => <button key={student.id} onClick={() => onView("journal")}><Avatar name={student.fullName} color={student.avatarColor} size="lg" /><span><strong>{student.fullName}</strong><small>{student.className} класс · средний балл {weightedAverage(snapshot.grades.filter((grade) => grade.studentId === student.id))}</small></span><Icon name="chevron" /></button>)}</section>{snapshot.rankings.mode !== "none" ? <RankingBoard snapshot={snapshot} /> : null}{!snapshot.students.length ? <EmptyState title="Нет доступных карточек" text="Связь с ребёнком или классом должен подтвердить администратор школы." icon="users" /> : null}</div>;
+    return <div className="page-shell"><div className="page-heading"><div><span className="eyebrow">{snapshot.viewer.role === "teacher" ? "Назначенные классы" : "Семья"}</span><h1>{snapshot.viewer.role === "teacher" ? "Мои классы и ученики" : "Мои дети"}</h1><p>Только разрешённые карточки без доступа к чужим данным</p></div></div><section className="student-directory">{snapshot.students.map((student) => <button key={student.id} onClick={() => setSelectedStudentId(student.id)}><Avatar name={student.fullName} color={student.avatarColor} size="lg" /><span><strong>{student.fullName}</strong><small>{student.className} класс · средний балл {weightedAverage(snapshot.grades.filter((grade) => grade.studentId === student.id))}</small></span><Icon name="chevron" /></button>)}</section>{snapshot.rankings.mode !== "none" ? <RankingBoard snapshot={snapshot} /> : null}{!snapshot.students.length ? <EmptyState title="Нет доступных карточек" text="Связь с ребёнком или классом должен подтвердить администратор школы." icon="users" /> : null}{selectedStudentId && snapshot.students.some((student) => student.id === selectedStudentId) ? <StudentProfile student={snapshot.students.find((student) => student.id === selectedStudentId)!} snapshot={snapshot} close={() => setSelectedStudentId(null)} /> : null}</div>;
   }
-  const unresolved = snapshot.users.filter((user) => user.role === "teacher" && user.profileStatus !== "confirmed" && user.profileStatus !== "demo");
-  return <div className="page-shell"><div className="page-heading"><div><span className="eyebrow">Единые карточки ArtHello OS</span><h1>Люди, классы и семьи</h1><p>Read-only проекция центрального реестра без повторного создания в дневнике</p></div><StatusPill tone="good">Источник: ArtHello OS</StatusPill></div><section className="metric-grid"><MetricCard label="Классы" value={String(snapshot.classes.length)} caption="центральная проекция" icon="school" /><MetricCard label="Ученики" value={String(snapshot.students.length)} caption="центральные карточки" icon="users" tone="blue" /><MetricCard label="Педагоги" value={String(snapshot.users.filter((user) => user.role === "teacher" && user.profileStatus !== "demo").length)} caption="в матрице" icon="user" tone="violet" /><MetricCard label="Требуют решения" value={String(unresolved.length)} caption="вакансии и уточнения" icon="info" tone="amber" /></section>{snapshot.rankings.mode === "named" ? <RankingBoard snapshot={snapshot} /> : <section className="content-card"><SectionTitle title="Классы" subtitle="Классный руководитель и количество учеников" /><div className="class-grid">{snapshot.classes.map((schoolClass) => <div className="class-card" key={schoolClass.id}><span>{schoolClass.grade}</span><div><strong>{schoolClass.name} класс</strong><small>{schoolClass.homeroomTeacherName ?? "Классный руководитель не назначен"}</small></div><b>{snapshot.students.filter((student) => student.className === schoolClass.name).length}</b></div>)}</div></section>}<section className="content-card"><SectionTitle title="Педагогический состав" subtitle={`${unresolved.length} позиций требуют решения`} /><StaffDirectory snapshot={snapshot} /></section></div>;
+  const teachers = snapshot.users.filter((user) => user.role === "teacher" && user.status !== "archived" && user.profileStatus !== "demo");
+  const unresolved = teachers.filter((user) => user.profileStatus !== "confirmed");
+  const filteredStudents = classFilter === "all" ? snapshot.students : snapshot.students.filter((student) => student.className === classFilter);
+  const selectedStudent = snapshot.students.find((student) => student.id === selectedStudentId) ?? null;
+  return <div className="page-shell">
+    <div className="page-heading"><div><span className="eyebrow">Единые карточки ArtHello OS</span><h1>Люди, классы и семьи</h1><p>Ученики разнесены по классам; состав класса виден без перехода в другие разделы</p></div><StatusPill tone="good">Источник: ArtHello OS</StatusPill></div>
+    <section className="metric-grid"><MetricCard label="Классы" value={String(snapshot.classes.length)} caption="центральная проекция" icon="school" /><MetricCard label="Ученики" value={String(snapshot.students.length)} caption="центральные карточки" icon="users" tone="blue" /><MetricCard label="Педагоги" value={String(teachers.length)} caption="в матрице" icon="user" tone="violet" /><MetricCard label="Требуют решения" value={String(unresolved.length)} caption="вакансии и уточнения" icon="info" tone="amber" /></section>
+    <Tabs id="people-directory" value={directoryTab} options={[{ id: "students", label: `Ученики · ${snapshot.students.length}` }, { id: "classes", label: `Классы · ${snapshot.classes.length}` }, { id: "teachers", label: `Педагоги · ${teachers.length}` }]} onChange={(value) => { setDirectoryTab(value); setSelectedStudentId(null); }} ariaLabel="Люди и классы" className="tab-row compact-tabs" />
+    <TabPanel tabsId="people-directory" value={directoryTab}>
+      {directoryTab === "students" ? <section className="content-card">
+        <SectionTitle title="Ученики" subtitle={classFilter === "all" ? `Все ученики · ${snapshot.students.length}` : `${classFilter} класс · ${filteredStudents.length} учеников`} />
+        <div className="calendar-toolbar"><label><span>Показывать класс</span><select value={classFilter} onChange={(event) => { setClassFilter(event.target.value); setSelectedStudentId(null); }}><option value="all">Все ученики</option>{snapshot.classes.map((schoolClass) => <option key={schoolClass.id} value={schoolClass.name}>{schoolClass.name} класс</option>)}</select></label></div>
+        <section className="student-directory">{filteredStudents.map((student) => <button key={student.id} onClick={() => setSelectedStudentId(student.id)} aria-pressed={selectedStudentId === student.id}><Avatar name={student.fullName} color={student.avatarColor} size="lg" /><span><strong>{student.fullName}</strong><small>{student.className} класс · средний балл {weightedAverage(snapshot.grades.filter((grade) => grade.studentId === student.id))}</small></span><Icon name="chevron" /></button>)}</section>
+        {!filteredStudents.length ? <EmptyState title="В классе пока нет учеников" text="Проверьте привязку учеников к классу в центральном реестре." icon="users" /> : null}
+      </section> : null}
+      {directoryTab === "classes" ? <section className="content-card"><SectionTitle title="Классы" subtitle="Откройте класс, чтобы сразу увидеть его учеников" /><div className="class-grid">{snapshot.classes.map((schoolClass) => { const count = snapshot.students.filter((student) => student.className === schoolClass.name).length; return <button className="class-card" key={schoolClass.id} onClick={() => { setClassFilter(schoolClass.name); setDirectoryTab("students"); }}><span>{schoolClass.grade}</span><div><strong>{schoolClass.name} класс</strong><small>{schoolClass.homeroomTeacherName ?? "Классный руководитель не назначен"}</small></div><b>{count}</b></button>; })}</div></section> : null}
+      {directoryTab === "teachers" ? <section className="content-card"><SectionTitle title="Педагогический состав" subtitle={`${unresolved.length} позиций требуют решения`} /><StaffDirectory snapshot={snapshot} /></section> : null}
+    </TabPanel>
+    {selectedStudent ? <StudentProfile student={selectedStudent} snapshot={snapshot} close={() => setSelectedStudentId(null)} /> : null}
+  </div>;
 }
 
 function ManagementPage({ snapshot, openAction }: { snapshot: SchoolSnapshot; openAction: (kind: ActionKind, preset?: Record<string, string>) => void }) {
@@ -904,13 +972,17 @@ function MessagesPage({ snapshot, send, viewThread }: { snapshot: SchoolSnapshot
   return <div className="page-shell messages-shell"><div className="page-heading"><div><span className="eyebrow">Родитель ↔ учитель</span><h1>Сообщения</h1><p>Официальный диалог по ребёнку, без общего школьного чата</p></div></div><div className="official-channel"><Icon name="lock" size={17} /><p>Это официальный канал школы. Переписка доступна уполномоченному администратору, завучу и директору. Просмотр и действия журналируются.</p></div><div className="messenger"><aside>{snapshot.threads.map((item) => <button key={item.id} className={cn(item.id === thread.id && "active")} onClick={() => setActiveThread(item.id)}><Avatar name={snapshot.viewer.role === "parent" ? item.teacherName : item.parentName} size="sm" /><span><strong>{snapshot.viewer.role === "parent" ? item.teacherName : item.parentName}</strong><small>{item.studentName}</small></span><Icon name="chevron" size={16} /></button>)}</aside><section><header><Avatar name={snapshot.viewer.role === "parent" ? thread.teacherName : thread.parentName} size="sm" /><span><strong>{snapshot.viewer.role === "parent" ? thread.teacherName : thread.parentName}</strong><small>{thread.title}</small></span><StatusPill tone="good">Официальный диалог</StatusPill></header><div className="message-stream">{messages.map((message) => <article key={message.id} className={cn(message.authorUserId === snapshot.viewer.id && "own", snapshot.viewer.role === "admin" && message.authorRole === snapshot.viewer.role && "own")}><span>{message.body}</span><small>{message.authorName} · {formatDateTime(message.createdAt)}</small></article>)}</div><form className="message-form" onSubmit={submit}><textarea value={draft} onChange={(event) => setDraft(event.target.value)} placeholder="Напишите сообщение…" maxLength={1500} rows={2} /><button className="primary-btn" disabled={sending || !draft.trim()} aria-label="Отправить" aria-busy={designCodeV1 ? sending : undefined}><Icon name="send" size={18} /><span>Отправить</span></button></form></section></div></div>;
 }
 
-function ProfilePage({ snapshot }: { snapshot: SchoolSnapshot; openAction: (kind: ActionKind, preset?: Record<string, string>) => void }) {
-  const student = snapshot.selectedStudent;
+function ProfilePage({ snapshot }: { snapshot: SchoolSnapshot }) {
+  const familyProfile = snapshot.viewer.role === "parent" || snapshot.viewer.role === "student";
+  const student = familyProfile ? snapshot.selectedStudent : null;
+  const subscriptions = student ? snapshot.subscriptions.filter((item) => item.studentId === student.id) : [];
   return <div className="page-shell">
-    <div className="profile-head"><Avatar name={snapshot.viewer.displayName} size="lg" /><div><span className="eyebrow">{roleLabels[snapshot.viewer.role]}</span><h1>{snapshot.viewer.displayName}</h1><p>{snapshot.viewer.phone ?? snapshot.viewer.email}</p></div><Link className="ghost-btn" href="/api/auth/logout"><Icon name="logout" size={17} />Выйти</Link></div>
+    <div className="profile-head"><Avatar name={snapshot.viewer.displayName} size="lg" /><div><span className="eyebrow">{roleLabels[snapshot.viewer.role]}</span><h1>{snapshot.viewer.displayName}</h1><p>{snapshot.viewer.phone ?? snapshot.viewer.email}</p></div><Link className="ghost-btn" href="/api/auth/return-to-arthello"><Icon name="back" size={17} />Вернуться в ArtHello OS</Link><Link className="ghost-btn" href="/api/auth/logout"><Icon name="logout" size={17} />Выйти</Link></div>
     {student ? <section className="content-card child-profile"><SectionTitle title="Карточка ребёнка" /><Avatar name={student.fullName} color={student.avatarColor} size="lg" /><div><h2>{student.fullName}</h2><p>{student.className} класс · 2026/27 учебный год</p><span><StatusPill tone="good">Профиль активен</StatusPill><StatusPill tone="blue">Доступ выдаётся в ArtHello OS</StatusPill></span></div></section> : null}
-    <section className="content-card"><SectionTitle title="Абонементы и расчёты" subtitle="Основная школа и дополнительные занятия" />{snapshot.subscriptions.length ? <div className="subscription-grid">{snapshot.subscriptions.map((item) => <article key={item.id}><header><span className="subscription-icon"><Icon name="qr" /></span><StatusPill tone={item.status === "active" ? "good" : "warn"}>{item.status === "active" ? "Активен" : item.status}</StatusPill></header><h3>{item.name}</h3><p>{item.period}</p><dl><div><dt>Баланс</dt><dd>{item.balance ? formatMoney(item.balance) : "Оплачено"}</dd></div>{item.lessonsLeft ? <div><dt>Осталось</dt><dd>{item.lessonsLeft} занятий</dd></div> : null}{item.renewalAt ? <div><dt>Продление</dt><dd>{formatDate(item.renewalAt)}</dd></div> : null}</dl></article>)}</div> : <EmptyState title="Абонементов нет" text="Активные услуги появятся после назначения администратором." icon="qr" />}</section>
-    <section className="privacy-card"><span><Icon name="lock" /></span><div><strong>Данные ребёнка видны только семье и сотрудникам с назначенной ролью</strong><p>Все изменения оценок, заданий и комментариев записываются в системный журнал.</p></div></section>
+    {familyProfile ? <>
+      <section className="content-card"><SectionTitle title="Абонементы и расчёты" subtitle="Основная школа и дополнительные занятия" />{subscriptions.length ? <div className="subscription-grid">{subscriptions.map((item) => <article key={item.id}><header><span className="subscription-icon"><Icon name="qr" /></span><StatusPill tone={item.status === "active" ? "good" : "warn"}>{item.status === "active" ? "Активен" : item.status}</StatusPill></header><h3>{item.name}</h3><p>{item.period}</p><dl><div><dt>Баланс</dt><dd>{item.balance ? formatMoney(item.balance) : "Оплачено"}</dd></div>{item.lessonsLeft ? <div><dt>Осталось</dt><dd>{item.lessonsLeft} занятий</dd></div> : null}{item.renewalAt ? <div><dt>Продление</dt><dd>{formatDate(item.renewalAt)}</dd></div> : null}</dl></article>)}</div> : <EmptyState title="Абонементов нет" text="Активные услуги появятся после назначения администратором." icon="qr" />}</section>
+      <section className="privacy-card"><span><Icon name="lock" /></span><div><strong>Данные ребёнка видны только семье и сотрудникам с назначенной ролью</strong><p>Все изменения оценок, заданий и комментариев записываются в системный журнал.</p></div></section>
+    </> : <section className="privacy-card"><span><Icon name="lock" /></span><div><strong>Профиль сотрудника</strong><p>Ученики и классы доступны в разделе «Люди». Личный профиль не связывает вас с чужими детьми.</p></div></section>}
   </div>;
 }
 
@@ -1286,11 +1358,11 @@ export default function SchoolApp() {
         : activeView === "journal" ? <StudyPage key="journal" snapshot={snapshot} openAction={openAction} initialTab="grades" />
           : activeView === "homework" ? <StudyPage key="homework" snapshot={snapshot} openAction={openAction} initialTab="homework" />
             : activeView === "programs" ? <ProgramsPage snapshot={snapshot} openAction={openAction} />
-              : activeView === "people" ? <PeoplePage snapshot={snapshot} openAction={openAction} onView={navigate} />
+              : activeView === "people" ? <PeoplePage snapshot={snapshot} />
                 : activeView === "school" ? <SchoolPage snapshot={snapshot} openAction={openAction} />
                   : activeView === "messages" ? <MessagesPage snapshot={snapshot} send={send} viewThread={viewThread} />
                     : activeView === "management" ? <ManagementPage snapshot={snapshot} openAction={openAction} />
-                      : <ProfilePage snapshot={snapshot} openAction={openAction} />;
+                      : <ProfilePage snapshot={snapshot} />;
   const content = hasAccess ? routedContent : <AccessDeniedPage onHome={() => navigate("home")} />;
   const helpAction = modal?.kind ?? (generatedInvite ? "family.invite.create" : undefined);
   const helpOverlayKey = modal ? "action-form" : generatedInvite ? "invite-result" : undefined;

@@ -28,10 +28,12 @@ export type StudentRecord = {
   fullName: string;
   className: string;
   birthYear: number | null;
+  parentNames?: string[];
   avatarColor: string;
 };
 
 export type UserRecord = {
+  identitySource?: string;
   id: string;
   email: string;
   displayName: string;

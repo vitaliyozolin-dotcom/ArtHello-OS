@@ -179,6 +179,7 @@ const ACADEMIC_CALENDAR_PERIODS = [
 ] as const;
 
 const SCHOOL_SUBJECTS = [
+  { id: "biology", name: "Биология", shortName: "Биология", color: "#5a9b4c", icon: "Б", stage: "6" },
   {
     id: "math",
     name: "Математика",
@@ -606,7 +607,7 @@ async function ensureSchoolStructure() {
         .bind(period.id, ACADEMIC_YEAR.id, period.title, period.startsOn, period.endsOn),
     ),
     db.prepare(
-      "UPDATE subjects SET status = 'archived', updated_at = CURRENT_TIMESTAMP WHERE id IN ('algebra', 'geometry', 'social', 'physics', 'chemistry', 'biology')",
+      "UPDATE subjects SET status = 'archived', updated_at = CURRENT_TIMESTAMP WHERE id IN ('algebra', 'geometry', 'social', 'physics', 'chemistry')",
     ),
     db.prepare(
       "UPDATE users SET status = 'archived', profile_status = 'demo', notes = 'Архивная тестовая запись' WHERE id IN ('user-admin-demo', 'user-parent-demo', 'user-teacher-demo', 'user-student-demo')",
@@ -984,6 +985,23 @@ async function loadSnapshot(
       FROM school_classes c LEFT JOIN users u ON u.id = c.homeroom_teacher_user_id
       WHERE c.status = 'active' ORDER BY c.grade, c.name`),
   ]);
+  // Only parents with a confirmed, active school account and a student link
+  // are named here. The directory's family ID alone is not a parent identity.
+  const parentLinks = allowedStudentIds.length
+    ? await rows<{ userId: string; studentId: string; displayName: string }>(
+        `SELECT u.id AS userId, l.student_id AS studentId, u.display_name AS displayName
+         FROM user_student_links l JOIN users u ON u.id = l.user_id
+         WHERE l.student_id IN (${placeholders}) AND u.role = 'parent' AND u.status = 'active'
+         UNION
+         SELECT u.id AS userId, u.linked_student_id AS studentId, u.display_name AS displayName
+         FROM users u WHERE u.linked_student_id IN (${placeholders})
+           AND u.role = 'parent' AND u.status = 'active'
+         ORDER BY displayName`,
+        [...studentBindings, ...studentBindings],
+      )
+    : [];
+  for (const student of students)
+    student.parentNames = parentLinks.filter((link) => link.studentId === student.id).map((link) => link.displayName);
   const selectedStudent =
     students.find((student) => student.id === selectedStudentId) ?? null;
   const rankingsPromise = loadRankings(viewer, selectedStudent);
@@ -1121,9 +1139,9 @@ async function loadSnapshot(
     : viewer.role === "methodist"
       ? await rows<SchoolSnapshot["users"][number]>(
           `SELECT id, '' AS email, display_name AS displayName, role,
-          NULL AS linkedStudentId, status, profile_status AS profileStatus,
+          NULL AS linkedStudentId, status, profile_status AS profileStatus, identity_source AS identitySource,
           '' AS notes
-          FROM users WHERE role = 'teacher' AND status = 'active'
+          FROM users WHERE role = 'teacher' AND status IN ('active','setup')
           ORDER BY display_name`,
         )
       : [];
