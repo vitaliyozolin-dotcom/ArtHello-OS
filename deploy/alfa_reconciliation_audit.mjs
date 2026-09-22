@@ -11,6 +11,10 @@ const safeFailure = error => /^HTTP_\d{3}$|^[A-Z_0-9]{3,60}$/.test(error?.messag
 export function classifyAlfaApiFailure(status, payload) {
   const message = typeof payload?.error === 'string' ? payload.error : '';
   const reasons = new Map([
+    ['AlfaCRM не вернула корректный список записей. Изменения не применены.','ALFA_INVALID_LIST'],
+    ['AlfaCRM вернула некорректное количество записей.','ALFA_INVALID_TOTAL'],
+    ['Серверный канал AlfaCRM не настроен. Подключение не изменено.','ALFA_TRANSPORT_NOT_CONFIGURED'],
+    ['AlfaCRM перенаправила запрос. Проверьте адрес аккаунта; данные доступа на другой адрес не отправлялись.','ALFA_REDIRECT'],
     ['AlfaCRM повторила страницу. Полнота загрузки не подтверждена; изменения не применены.','ALFA_REPEATED_PAGE'],
     ['AlfaCRM повторила ID на страницах. Полнота загрузки не подтверждена; повторите чтение.','ALFA_REPEATED_ID'],
     ['Список AlfaCRM изменился во время чтения. Повторите предпросмотр.','ALFA_TOTAL_CHANGED'],

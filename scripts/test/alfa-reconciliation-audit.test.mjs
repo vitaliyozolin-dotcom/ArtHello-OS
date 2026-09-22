@@ -7,6 +7,12 @@ test('failure diagnostics disclose only fixed reasons, never API text',()=>{
   assert.equal(classifyAlfaApiFailure(502,{error:'private person token secret'}),'HTTP_502');
   assert.equal(classifyAlfaApiFailure(502,{error:'AlfaCRM не выполнила чтение данных (private).'}),'HTTP_502');
   assert.equal(classifyAlfaApiFailure(502,null),'HTTP_502');
+  for(const [message,code] of [
+    ['AlfaCRM не вернула корректный список записей. Изменения не применены.','ALFA_INVALID_LIST'],
+    ['AlfaCRM вернула некорректное количество записей.','ALFA_INVALID_TOTAL'],
+    ['Серверный канал AlfaCRM не настроен. Подключение не изменено.','ALFA_TRANSPORT_NOT_CONFIGURED'],
+    ['AlfaCRM перенаправила запрос. Проверьте адрес аккаунта; данные доступа на другой адрес не отправлялись.','ALFA_REDIRECT'],
+  ]) assert.equal(classifyAlfaApiFailure(502,{error:message}),code);
 });
 test('public reconciliation counts never include customer identifiers or upstream names',()=>{
   const report=summarizePreview({customerPreview:{byBranch:{'6':{active:3,phone:'private'}},intersections:[{id:'private',branches:['6','8']}],schoolAssignments:[{id:'private'}],comparison:{archiveIds:['private'],moves:[{name:'private'}]},raw:'private'}});
