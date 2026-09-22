@@ -874,3 +874,28 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
   .student-launch-grid strong { font-size: 18px; }
   .student-launch-grid em { display: none; }
 }
+
+.student-profile-modal { width: min(720px, 100%); }
+.student-profile-modal > header { min-height: 76px; }
+.student-profile-body { min-height: 0; overflow-y: auto; padding: 20px 22px 25px; display: grid; gap: 20px; }
+.student-profile-identity { display: flex; align-items: center; gap: 13px; min-width: 0; }
+.student-profile-identity > div { min-width: 0; display: grid; gap: 4px; }
+.student-profile-identity strong { font-size: 17px; line-height: 1.3; }
+.student-profile-identity span:not(.l0-avatar) { color: var(--muted); font-size: 12px; }
+.student-profile-facts { margin: 0; display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 9px; }
+.student-profile-facts > div { min-width: 0; padding: 12px 14px; border: 1px solid var(--line); border-radius: 13px; background: #faf9f6; }
+.student-profile-facts dt { color: var(--muted); font-size: 10px; }
+.student-profile-facts dd { margin: 5px 0 0; font-size: 13px; font-weight: 750; overflow-wrap: anywhere; }
+.student-profile-section h3 { margin: 0 0 10px; font-size: 15px; }
+.student-profile-subjects, .student-profile-grades { display: grid; gap: 7px; }
+.student-profile-subjects > div { display: grid; grid-template-columns: minmax(0,1fr) auto auto; gap: 12px; align-items: center; padding: 10px 12px; border: 1px solid var(--line); border-radius: 11px; font-size: 12px; }
+.student-profile-subjects strong { font-size: 15px; }
+.student-profile-subjects small, .student-profile-grades small { color: var(--muted); font-size: 10px; }
+.student-profile-grades > div { display: flex; align-items: center; gap: 11px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 12px; }
+.student-profile-grades > div > div { min-width: 0; display: grid; gap: 3px; }
+.student-profile-grades strong { font-size: 12px; }
+.student-profile-empty { margin: 0; color: var(--muted); font-size: 12px; }
+@media (max-width: 600px) {
+  .student-profile-body { padding: 16px; gap: 17px; }
+  .student-profile-facts { grid-template-columns: 1fr; }
+}
