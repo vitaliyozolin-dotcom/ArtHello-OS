@@ -21,3 +21,7 @@ export function accessAllowed(employeeStatus: string, accessStatus: string) {
 }
 
 export function salaryRub(minor: number) { return Math.round(minor / 100); }
+
+export function isArchivedEmployee(status: string) {
+  return status === "Уволен" || status === "Неактивен в AlfaCRM";
+}
