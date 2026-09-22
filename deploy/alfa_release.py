@@ -390,8 +390,8 @@ def main():
     old_image = json.loads(docker('image', 'inspect', old['Image']))[0]
     require(old_image['Config']['Labels']['org.opencontainers.image.revision'] == PINS[system][0], 'PREDECESSOR')
     if system == 'atlas':
-        require(old['Id'] == '6f437dfaf2bd562992fc921a2a24d0489ffdc4c944b601e625c7559e77a9358b'
-                and old['Image'] == 'sha256:15f2fc76f8dd0a1c8b40a21105913e6a99273af4939908fe5e3da5e4431cc9aa', 'PREDECESSOR_INVENTORY')
+        require(old['Id'] == '5235636da8f4fbca660e32b6c6011e569f3cb6abc3706915d4dbb1c24cfa3233'
+                and old['Image'] == 'sha256:d78c6c6d6681472c261fb28fec9233609d6469d0cd266cd43d7d2a3cafc58815', 'PREDECESSOR_INVENTORY')
     plan = runtime_plan(old, system, image, image_source, image_tree)
     if system == 'central':
         require(old['Id'] == '36a0f675e0145de6ba4399efaab7bbcb27f0cabfc7cdf9d3c1380af2aba5d7c3', 'PREDECESSOR_INVENTORY')
