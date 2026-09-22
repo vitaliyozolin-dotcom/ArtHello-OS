@@ -100,7 +100,7 @@
 }
 
 /* The approved school design flag has more specific legacy type selectors. */
-html[data-design-code="v1"] .page-heading h1 {
+html[data-design-code="v1"] :is(.page-heading, .profile-head) h1 {
   font-size: var(--diary-page-title-size);
   line-height: var(--diary-page-title-line);
   font-weight: var(--diary-ui-weight);
@@ -111,6 +111,25 @@ html[data-design-code="v1"] .section-title h2 {
   line-height: var(--diary-section-title-line);
   font-weight: var(--diary-ui-weight);
 }
+html[data-design-code="v1"] :is(.l0-app, .modal-backdrop) :is(.action-modal h2, .student-profile-section h3) {
+  font-size: var(--diary-section-title-size);
+  line-height: var(--diary-section-title-line);
+  font-weight: var(--diary-ui-weight);
+}
+html[data-design-code="v1"] .l0-app .page-heading p {
+  font-size: 14px;
+  line-height: 20px;
+}
+html[data-design-code="v1"] .l0-app .l0-brand strong {
+  font-size: 16px;
+  line-height: 20px;
+  font-weight: var(--diary-ui-weight);
+}
+html[data-design-code="v1"] .l0-app .eyebrow {
+  font-size: 11px;
+  line-height: 14px;
+  font-weight: var(--diary-ui-weight);
+}
 html[data-design-code="v1"] .metric-card small {
   font-size: var(--diary-kpi-label-size);
   line-height: var(--diary-kpi-label-line);
@@ -119,6 +138,30 @@ html[data-design-code="v1"] .metric-card small {
 html[data-design-code="v1"] .metric-card strong {
   font-size: var(--diary-kpi-value-size);
   line-height: var(--diary-kpi-value-line);
+  font-weight: var(--diary-ui-weight);
+}
+html[data-design-code="v1"] .l0-app .metric-card p {
+  font-size: var(--diary-kpi-note-size);
+  line-height: var(--diary-kpi-note-line);
+}
+html[data-design-code="v1"] .l0-app :is(.student-directory, .student-mini-list, .class-grid) strong {
+  font-size: var(--diary-list-title-size);
+  line-height: var(--diary-list-title-line);
+  font-weight: 500;
+}
+html[data-design-code="v1"] .l0-app :is(.student-directory, .student-mini-list, .class-grid) small {
+  font-size: var(--diary-list-body-size);
+  line-height: var(--diary-list-body-line);
+  font-weight: 400;
+}
+html[data-design-code="v1"] .student-profile-identity strong {
+  font-size: 16px;
+  line-height: 24px;
+  font-weight: var(--diary-ui-weight);
+}
+html[data-design-code="v1"] .student-profile-facts dd {
+  font-size: 14px;
+  line-height: 20px;
   font-weight: var(--diary-ui-weight);
 }
 html[data-design-code="v1"] :is(.primary-btn, .ghost-btn) {

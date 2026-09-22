@@ -242,7 +242,7 @@ test("only approved design radii are defined", () => {
   assert.deepEqual(radiusDefinitions, ["8px", "12px", "16px", "20px", "999px"]);
 });
 
-test("rollout is explicit and disabled by default", () => {
+test("design code is gated by the build flag", () => {
   assert.match(
     layout,
     /process\.env\.NEXT_PUBLIC_SCHOOL_DESIGN_V1 === "true"/,
@@ -277,8 +277,8 @@ test("approved Onest is served as a local preloaded WOFF2", () => {
   );
 });
 
-test("container build gate is false unless explicitly enabled", () => {
-  assert.match(dockerfile, /^ARG NEXT_PUBLIC_SCHOOL_DESIGN_V1=false/m);
+test("production container enables approved design by default", () => {
+  assert.match(dockerfile, /^ARG NEXT_PUBLIC_SCHOOL_DESIGN_V1=true/m);
   assert.equal(
     (dockerfile.match(/^ARG NEXT_PUBLIC_SCHOOL_DESIGN_V1$/gm) || []).length,
     2,
