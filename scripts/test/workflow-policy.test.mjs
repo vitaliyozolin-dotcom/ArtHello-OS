@@ -3,12 +3,23 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
+import { parse } from "yaml";
 
 import {
   analyzeWorkflowDirectory,
   analyzeWorkflowSource,
   evaluateWorkflowCountRatchet,
 } from "../workflow-policy.mjs";
+
+test('source audit changes trigger every required production producer on main',async()=>{
+  for(const name of ['proof-gates.yml','verify-arthello-v52.yml']) {
+    const workflow=parse(await readFile(new URL('../../.github/workflows/'+name,import.meta.url),'utf8'));
+    for(const changed of ['.github/scripts/alfa-source-audit.mjs','scripts/test/alfa-source-transport-audit.test.mjs']) {
+      assert.ok(workflow.on.push.paths.some(pattern=>path.matchesGlob(changed,pattern)),name+' misses '+changed);
+    }
+    assert.ok(workflow.on.push.branches.includes('main'));
+  }
+});
 
 test("keeps the accepted R12-R17 verifier manual-only", async () => {
   const source = await readFile(

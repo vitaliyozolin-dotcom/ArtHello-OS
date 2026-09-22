@@ -5,6 +5,8 @@ on:
   push:
     branches: [main]
     paths:
+      - ".github/scripts/alfa-source-audit.mjs"
+      - "scripts/test/alfa-source-transport-audit.test.mjs"
       - "deploy/**"
       - "artifacts/api-server/src/lib/security/**"
       - "artifacts/api-server/src/routes/**"
