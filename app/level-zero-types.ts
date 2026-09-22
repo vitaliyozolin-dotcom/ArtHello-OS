@@ -28,6 +28,7 @@ export type StudentRecord = {
   fullName: string;
   className: string;
   birthYear: number | null;
+  parentNames?: string[];
   avatarColor: string;
 };
 

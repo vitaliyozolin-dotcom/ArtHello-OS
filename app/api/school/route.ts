@@ -985,6 +985,23 @@ async function loadSnapshot(
       FROM school_classes c LEFT JOIN users u ON u.id = c.homeroom_teacher_user_id
       WHERE c.status = 'active' ORDER BY c.grade, c.name`),
   ]);
+  // Only parents with a confirmed, active school account and a student link
+  // are named here. The directory's family ID alone is not a parent identity.
+  const parentLinks = allowedStudentIds.length
+    ? await rows<{ userId: string; studentId: string; displayName: string }>(
+        `SELECT u.id AS userId, l.student_id AS studentId, u.display_name AS displayName
+         FROM user_student_links l JOIN users u ON u.id = l.user_id
+         WHERE l.student_id IN (${placeholders}) AND u.role = 'parent' AND u.status = 'active'
+         UNION
+         SELECT u.id AS userId, u.linked_student_id AS studentId, u.display_name AS displayName
+         FROM users u WHERE u.linked_student_id IN (${placeholders})
+           AND u.role = 'parent' AND u.status = 'active'
+         ORDER BY displayName`,
+        [...studentBindings, ...studentBindings],
+      )
+    : [];
+  for (const student of students)
+    student.parentNames = parentLinks.filter((link) => link.studentId === student.id).map((link) => link.displayName);
   const selectedStudent =
     students.find((student) => student.id === selectedStudentId) ?? null;
   const rankingsPromise = loadRankings(viewer, selectedStudent);

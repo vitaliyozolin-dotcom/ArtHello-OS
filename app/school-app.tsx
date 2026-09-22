@@ -2,7 +2,7 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type FormEvent, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { Icon, type IconName } from "./icons";
 import { roleLabels, type ActionKind, type Role, type SchoolSnapshot } from "./level-zero-types";
@@ -830,13 +830,59 @@ function ProgramsPage({ snapshot, openAction }: { snapshot: SchoolSnapshot; open
   </div>;
 }
 
-function PeoplePage({ snapshot, onView }: { snapshot: SchoolSnapshot; openAction: (kind: ActionKind, preset?: Record<string, string>) => void; onView: (view: View) => void }) {
+function StudentProfile({ student, snapshot, close }: { student: SchoolSnapshot["students"][number]; snapshot: SchoolSnapshot; close: () => void }) {
+  const closeButton = useRef<HTMLButtonElement>(null);
+  const dialog = useRef<HTMLElement>(null);
+  useEffect(() => {
+    const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    closeButton.current?.focus();
+    return () => { if (previous?.isConnected) previous.focus(); };
+  }, []);
+  const grades = snapshot.grades.filter((grade) => grade.studentId === student.id);
+  const subjects = [...new Set(grades.map((grade) => grade.subjectId))].map((id) => {
+    const subjectGrades = grades.filter((grade) => grade.subjectId === id);
+    return { id, name: subjectGrades[0].subjectName, average: weightedAverage(subjectGrades), count: subjectGrades.length };
+  }).sort((left, right) => left.name.localeCompare(right.name, "ru"));
+  const homeroom = snapshot.classes.find((item) => item.name === student.className)?.homeroomTeacherName;
+  const onKeyDown = (event: ReactKeyboardEvent<HTMLElement>) => {
+    if (event.key === "Escape") { event.preventDefault(); close(); return; }
+    if (event.key !== "Tab") return;
+    const focusable = Array.from(dialog.current?.querySelectorAll<HTMLElement>('button:not(:disabled), a[href], [tabindex]:not([tabindex="-1"])') ?? []);
+    if (!focusable.length) return;
+    if (event.shiftKey && document.activeElement === focusable[0]) { event.preventDefault(); focusable.at(-1)?.focus(); }
+    else if (!event.shiftKey && document.activeElement === focusable.at(-1)) { event.preventDefault(); focusable[0].focus(); }
+  };
+  return <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) close(); }}>
+    <section ref={dialog} className="action-modal student-profile-modal" role="dialog" aria-modal="true" aria-labelledby="student-profile-title" onKeyDown={onKeyDown}>
+      <header><div><span className="eyebrow">Карточка ученика</span><h2 id="student-profile-title">{student.fullName}</h2></div><button ref={closeButton} type="button" onClick={close} aria-label="Закрыть карточку ученика"><Icon name="close" /></button></header>
+      <div className="student-profile-body">
+        <div className="student-profile-identity"><Avatar name={student.fullName} color={student.avatarColor} size="lg" /><div><strong>{student.fullName}</strong><span>{student.className} класс · {snapshot.school.academicYear} учебный год</span></div></div>
+        <dl className="student-profile-facts">
+          <div><dt>Класс</dt><dd>{student.className}</dd></div>
+          <div><dt>Классный руководитель</dt><dd>{homeroom ?? "Не назначен"}</dd></div>
+          <div><dt>Средняя оценка</dt><dd>{weightedAverage(grades)}</dd></div>
+          <div><dt>День рождения</dt><dd>Дата не указана</dd></div>
+          <div><dt>Год рождения</dt><dd>{student.birthYear ?? "Не указан"}</dd></div>
+          <div><dt>Родители с подтверждённой связью</dt><dd>{student.parentNames?.length ? student.parentNames.join(", ") : "Пока не указаны"}</dd></div>
+        </dl>
+        <section className="student-profile-section"><h3>Успеваемость по предметам</h3>
+          {subjects.length ? <div className="student-profile-subjects">{subjects.map((subject) => <div key={subject.id}><span>{subject.name}</span><strong>{subject.average}</strong><small>{subject.count} оценок</small></div>)}</div> : <p className="student-profile-empty">Оценок пока нет. Средний балл появится после первой оценки.</p>}
+        </section>
+        <section className="student-profile-section"><h3>Последние оценки</h3>
+          {grades.length ? <div className="student-profile-grades">{grades.slice(0, 5).map((grade) => <div key={grade.id}><span className={cn("grade-value", `grade-${grade.value}`)}>{grade.value}</span><div><strong>{grade.subjectName}</strong><small>{grade.title} · {formatDate(grade.gradeDate)}{grade.weight > 1 ? ` · вес ${grade.weight}` : ""}</small></div></div>)}</div> : <p className="student-profile-empty">Оценок пока нет.</p>}
+        </section>
+      </div>
+    </section>
+  </div>;
+}
+
+function PeoplePage({ snapshot }: { snapshot: SchoolSnapshot }) {
   const operational = snapshot.viewer.role === "director" || snapshot.viewer.role === "deputy" || snapshot.viewer.role === "admin";
   const [directoryTab, setDirectoryTab] = useState<"students" | "classes" | "teachers">("students");
   const [classFilter, setClassFilter] = useState<string>("all");
   const [selectedStudentId, setSelectedStudentId] = useState<string | null>(null);
   if (!operational) {
-    return <div className="page-shell"><div className="page-heading"><div><span className="eyebrow">{snapshot.viewer.role === "teacher" ? "Назначенные классы" : "Семья"}</span><h1>{snapshot.viewer.role === "teacher" ? "Мои классы и ученики" : "Мои дети"}</h1><p>Только разрешённые карточки без доступа к чужим данным</p></div></div><section className="student-directory">{snapshot.students.map((student) => <button key={student.id} onClick={() => onView("journal")}><Avatar name={student.fullName} color={student.avatarColor} size="lg" /><span><strong>{student.fullName}</strong><small>{student.className} класс · средний балл {weightedAverage(snapshot.grades.filter((grade) => grade.studentId === student.id))}</small></span><Icon name="chevron" /></button>)}</section>{snapshot.rankings.mode !== "none" ? <RankingBoard snapshot={snapshot} /> : null}{!snapshot.students.length ? <EmptyState title="Нет доступных карточек" text="Связь с ребёнком или классом должен подтвердить администратор школы." icon="users" /> : null}</div>;
+    return <div className="page-shell"><div className="page-heading"><div><span className="eyebrow">{snapshot.viewer.role === "teacher" ? "Назначенные классы" : "Семья"}</span><h1>{snapshot.viewer.role === "teacher" ? "Мои классы и ученики" : "Мои дети"}</h1><p>Только разрешённые карточки без доступа к чужим данным</p></div></div><section className="student-directory">{snapshot.students.map((student) => <button key={student.id} onClick={() => setSelectedStudentId(student.id)}><Avatar name={student.fullName} color={student.avatarColor} size="lg" /><span><strong>{student.fullName}</strong><small>{student.className} класс · средний балл {weightedAverage(snapshot.grades.filter((grade) => grade.studentId === student.id))}</small></span><Icon name="chevron" /></button>)}</section>{snapshot.rankings.mode !== "none" ? <RankingBoard snapshot={snapshot} /> : null}{!snapshot.students.length ? <EmptyState title="Нет доступных карточек" text="Связь с ребёнком или классом должен подтвердить администратор школы." icon="users" /> : null}{selectedStudentId && snapshot.students.some((student) => student.id === selectedStudentId) ? <StudentProfile student={snapshot.students.find((student) => student.id === selectedStudentId)!} snapshot={snapshot} close={() => setSelectedStudentId(null)} /> : null}</div>;
   }
   const teachers = snapshot.users.filter((user) => user.role === "teacher" && user.status !== "archived" && user.profileStatus !== "demo");
   const unresolved = teachers.filter((user) => user.profileStatus !== "confirmed");
@@ -850,13 +896,13 @@ function PeoplePage({ snapshot, onView }: { snapshot: SchoolSnapshot; openAction
       {directoryTab === "students" ? <section className="content-card">
         <SectionTitle title="Ученики" subtitle={classFilter === "all" ? `Все ученики · ${snapshot.students.length}` : `${classFilter} класс · ${filteredStudents.length} учеников`} />
         <div className="calendar-toolbar"><label><span>Показывать класс</span><select value={classFilter} onChange={(event) => { setClassFilter(event.target.value); setSelectedStudentId(null); }}><option value="all">Все ученики</option>{snapshot.classes.map((schoolClass) => <option key={schoolClass.id} value={schoolClass.name}>{schoolClass.name} класс</option>)}</select></label></div>
-        {selectedStudent ? <div className="privacy-card"><Avatar name={selectedStudent.fullName} color={selectedStudent.avatarColor} size="lg" /><div><strong>{selectedStudent.fullName}</strong><p>{selectedStudent.className} класс · средний балл {weightedAverage(snapshot.grades.filter((grade) => grade.studentId === selectedStudent.id))}</p></div></div> : null}
         <section className="student-directory">{filteredStudents.map((student) => <button key={student.id} onClick={() => setSelectedStudentId(student.id)} aria-pressed={selectedStudentId === student.id}><Avatar name={student.fullName} color={student.avatarColor} size="lg" /><span><strong>{student.fullName}</strong><small>{student.className} класс · средний балл {weightedAverage(snapshot.grades.filter((grade) => grade.studentId === student.id))}</small></span><Icon name="chevron" /></button>)}</section>
         {!filteredStudents.length ? <EmptyState title="В классе пока нет учеников" text="Проверьте привязку учеников к классу в центральном реестре." icon="users" /> : null}
       </section> : null}
       {directoryTab === "classes" ? <section className="content-card"><SectionTitle title="Классы" subtitle="Откройте класс, чтобы сразу увидеть его учеников" /><div className="class-grid">{snapshot.classes.map((schoolClass) => { const count = snapshot.students.filter((student) => student.className === schoolClass.name).length; return <button className="class-card" key={schoolClass.id} onClick={() => { setClassFilter(schoolClass.name); setDirectoryTab("students"); }}><span>{schoolClass.grade}</span><div><strong>{schoolClass.name} класс</strong><small>{schoolClass.homeroomTeacherName ?? "Классный руководитель не назначен"}</small></div><b>{count}</b></button>; })}</div></section> : null}
       {directoryTab === "teachers" ? <section className="content-card"><SectionTitle title="Педагогический состав" subtitle={`${unresolved.length} позиций требуют решения`} /><StaffDirectory snapshot={snapshot} /></section> : null}
     </TabPanel>
+    {selectedStudent ? <StudentProfile student={selectedStudent} snapshot={snapshot} close={() => setSelectedStudentId(null)} /> : null}
   </div>;
 }
 
@@ -1307,7 +1353,7 @@ export default function SchoolApp() {
         : activeView === "journal" ? <StudyPage key="journal" snapshot={snapshot} openAction={openAction} initialTab="grades" />
           : activeView === "homework" ? <StudyPage key="homework" snapshot={snapshot} openAction={openAction} initialTab="homework" />
             : activeView === "programs" ? <ProgramsPage snapshot={snapshot} openAction={openAction} />
-              : activeView === "people" ? <PeoplePage snapshot={snapshot} openAction={openAction} onView={navigate} />
+              : activeView === "people" ? <PeoplePage snapshot={snapshot} />
                 : activeView === "school" ? <SchoolPage snapshot={snapshot} openAction={openAction} />
                   : activeView === "messages" ? <MessagesPage snapshot={snapshot} send={send} viewThread={viewThread} />
                     : activeView === "management" ? <ManagementPage snapshot={snapshot} openAction={openAction} />
