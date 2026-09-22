@@ -54,7 +54,7 @@ test("methodist snapshot is limited to curriculum data and a contact-free teache
   assert.match(api, /FROM menu_days WHERE \$\{viewer\.role === "methodist" \? "1 = 0" : "1 = 1"\}/);
   assert.match(api, /viewer\.role === "methodist" \? "1 = 0" : "status != 'archived'"/);
   assert.match(api, /viewer\.role === "methodist" \|\| viewer\.role === "tech_admin"[\s\S]*?threadQuery \+= " AND 1 = 0"/);
-  assert.match(api, /SELECT id, '' AS email, display_name AS displayName, role,[\s\S]*?FROM users WHERE role = 'teacher' AND status = 'active'/);
+  assert.match(api, /SELECT id, '' AS email, display_name AS displayName, role,[\s\S]*?FROM users WHERE role = 'teacher' AND status IN \('active','setup'\)/);
   assert.match(api, /viewer\.role === "methodist" \? "''" : "a\.notes"/);
   assert.match(api, /viewer\.role === "methodist"[\s\S]*?"WHERE a\.status = 'confirmed'"/);
   assert.match(api, /viewer\.role === "teacher" \|\| curriculumRoles\.has\(viewer\.role\)/);
