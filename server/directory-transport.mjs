@@ -18,7 +18,7 @@ export async function directoryRequest(request, config) {
     try {
       const db=await config.openDatabase();
       if(body.action==='inspect') return Response.json({classes:(await db.prepare("SELECT id,name,grade FROM school_classes WHERE status='active' ORDER BY grade,name").all()).results},{headers:{'cache-control':'no-store'}});
-      const result=await applyDirectorySnapshot(db,body.snapshot,body.action==='apply');
+      const result=await applyDirectorySnapshot(db,body.snapshot,body.action==='apply', {systemId:config.systemId,branchId:config.branchId});
       return Response.json(result,{headers:{'cache-control':'no-store'}});
     } catch { return Response.json({error:'Справочник не применён: проверьте версию, полноту и привязки классов'},{status:409}); }
   });
