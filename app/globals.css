@@ -143,10 +143,10 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .template-banner strong { color: #553a2e; }
 .page-heading { min-height: 72px; display: flex; align-items: center; gap: 18px; }
 .page-heading > div { flex: 1; min-width: 0; }
-.page-heading h1 { margin-top: 7px; font-size: clamp(29px, 4vw, 40px); line-height: 1.02; letter-spacing: -1.3px; }
+.page-heading h1 { margin-top: 7px; font-size: clamp(24px, 2.4vw, 29px); line-height: 1.14; letter-spacing: -1.3px; }
 .page-heading p { color: var(--muted); margin-top: 7px; font-size: 14px; }
 .section-title { min-height: 42px; display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; margin-bottom: 16px; }
-.section-title h2 { font-size: 19px; line-height: 1.2; letter-spacing: -.35px; }
+.section-title h2 { font-size: 17px; line-height: 1.2; letter-spacing: -.35px; }
 .section-title p { color: var(--muted); margin-top: 4px; font-size: 12px; }
 .content-card { border: 1px solid var(--line); border-radius: var(--radius-lg); padding: 22px; background: white; box-shadow: 0 8px 28px rgba(32,28,21,.035); }
 
@@ -167,7 +167,7 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .metric-button:hover { transform: translateY(-2px); border-color: #e1c0b2; box-shadow: var(--shadow); }
 .metric-card > div { min-width: 0; display: flex; flex-direction: column; }
 .metric-card small { color: var(--muted); font-size: 10px; font-weight: 750; text-transform: uppercase; letter-spacing: .04em; }
-.metric-card strong { margin-top: 3px; font-size: 25px; letter-spacing: -.8px; }
+.metric-card strong { margin-top: 3px; font-size: 21px; letter-spacing: -.8px; }
 .metric-card p { color: var(--muted); margin-top: 3px; font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .metric-icon { width: 45px; height: 45px; border-radius: 14px; display: grid; place-items: center; flex: 0 0 auto; }
 .metric-orange { color: var(--orange); background: var(--orange-soft); }
@@ -666,6 +666,7 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .class-grid { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 8px; }
 .class-grid button, .class-grid .class-card { min-height: 82px; border: 1px solid var(--line); border-radius: 16px; padding: 11px; background: #faf9f6; display: grid; grid-template-columns: 43px minmax(0,1fr) auto; align-items: center; gap: 10px; text-align: left; }
 .class-grid button { cursor: pointer; }
+.class-grid button:hover, .student-directory > button:hover { border-color: #e4ad96; background: #fff8f4; }
 .class-grid button > span, .class-grid .class-card > span { width: 43px; height: 43px; border-radius: 13px; background: var(--orange-soft); color: var(--orange); display: grid; place-items: center; font-size: 17px; font-weight: 900; }
 .class-grid button > div, .class-grid .class-card > div { min-width: 0; display: grid; gap: 4px; }
 .class-grid strong { font-size: 12px; }
@@ -750,7 +751,7 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
   .role-student .l0-bottom-nav button.active { color: var(--student-highlight); background: var(--student-highlight-faint); }
   .template-banner { align-items: flex-start; }
   .page-heading { align-items: flex-end; }
-  .page-heading h1 { font-size: 30px; }
+  .page-heading h1 { font-size: 24px; }
   .page-heading .primary-btn { min-width: 45px; width: 45px; padding: 0; flex: 0 0 45px; overflow: hidden; }
   .page-heading .primary-btn:has(svg) { gap: 0; font-size: 0; }
   .page-heading .primary-btn:not(:has(svg)) { width: auto; flex-basis: auto; font-size: 13px; }
@@ -879,4 +880,30 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
   .student-launch-grid small { min-height: 27px; }
   .student-launch-grid strong { font-size: 18px; }
   .student-launch-grid em { display: none; }
+}
+
+/* Student cards share the same accessible dialog as School 1–11. */
+.student-profile-modal { width: min(720px, 100%); }
+.student-profile-modal > header { min-height: 76px; }
+.student-profile-body { min-height: 0; overflow-y: auto; padding: 20px 22px 25px; display: grid; gap: 20px; }
+.student-profile-identity { display: flex; align-items: center; gap: 13px; min-width: 0; }
+.student-profile-identity > div { min-width: 0; display: grid; gap: 4px; }
+.student-profile-identity strong { font-size: 17px; line-height: 1.3; }
+.student-profile-identity span:not(.l0-avatar) { color: var(--muted); font-size: 12px; }
+.student-profile-facts { margin: 0; display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 9px; }
+.student-profile-facts > div { min-width: 0; padding: 12px 14px; border: 1px solid var(--line); border-radius: 13px; background: #faf9f6; }
+.student-profile-facts dt { color: var(--muted); font-size: 10px; }
+.student-profile-facts dd { margin: 5px 0 0; font-size: 13px; font-weight: 750; overflow-wrap: anywhere; }
+.student-profile-section h3 { margin: 0 0 10px; font-size: 15px; }
+.student-profile-subjects, .student-profile-grades { display: grid; gap: 7px; }
+.student-profile-subjects > div { display: grid; grid-template-columns: minmax(0,1fr) auto auto; gap: 12px; align-items: center; padding: 10px 12px; border: 1px solid var(--line); border-radius: 11px; font-size: 12px; }
+.student-profile-subjects strong { font-size: 15px; }
+.student-profile-subjects small, .student-profile-grades small { color: var(--muted); font-size: 10px; }
+.student-profile-grades > div { display: flex; align-items: center; gap: 11px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 12px; }
+.student-profile-grades > div > div { min-width: 0; display: grid; gap: 3px; }
+.student-profile-grades strong { font-size: 12px; }
+.student-profile-empty { margin: 0; color: var(--muted); font-size: 12px; }
+@media (max-width: 600px) {
+  .student-profile-body { padding: 16px; gap: 17px; }
+  .student-profile-facts { grid-template-columns: 1fr; }
 }
