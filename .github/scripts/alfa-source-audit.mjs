@@ -3,6 +3,18 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 
+export async function summarizeTransportProbe(response) {
+  if(response.ok) { await response.body?.cancel(); return {status:response.status,ok:true}; }
+  let code;
+  try { const text=await response.text(); if(text.length<=16_384) code=JSON.parse(text)?.error; } catch {}
+  // Transport drops all upstream headers except content-type, so this marker
+  // cannot originate in a forwarded AlfaCRM error body.
+  const marker=response.headers.get('x-arthello-upstream-error');
+  const allowed=marker==='unavailable' && response.status===502 ? ['upstream_response_too_large','upstream_unavailable']
+    : marker==='timeout' && response.status===504 ? ['upstream_timeout'] : [];
+  return {status:response.status,ok:false,reason:allowed.includes(code)?code:'unclassified'};
+}
+
 function databases(dir) {
   return readdirSync(dir, { withFileTypes: true }).flatMap(entry => entry.isDirectory()
     ? databases(join(dir, entry.name)) : entry.name.endsWith('.sqlite') ? [join(dir, entry.name)] : []);
@@ -58,12 +70,26 @@ async function main() {
   const aad = 'arthello.integration-credential.v2\nINT-T-ALFACRM\nARTHELLO\nALFACRM-V2\nTOCHKA_ACCOUNTS_READ_V1';
   const credentials = JSON.parse(new TextDecoder().decode(await crypto.subtle.decrypt({name:'AES-GCM',iv:Buffer.from(envelope.iv,'base64url'),additionalData:new TextEncoder().encode(aad),tagLength:128},key,Buffer.from(envelope.ciphertext,'base64url'))));
   let token = '';
+  const {createAlfaCrmTransport}=await import('/app/production/alfacrm-transport.mjs');
+  const transport=createAlfaCrmTransport();
+  const teacherReads={};
   async function request(path, body) {
     await new Promise(resolve => setTimeout(resolve, 250));
     const response = await fetch(`${state.endpoint}/v2api/${path}`, { method:'POST',redirect:'manual',signal:AbortSignal.timeout(30000),
       headers:{'content-type':'application/json',accept:'application/json',...(token?{'X-ALFACRM-TOKEN':token}:{}),...(credentials.appKey?{'X-APP-KEY':credentials.appKey}:{})},body:JSON.stringify(body) });
     if (!response.ok) throw Error(`UPSTREAM_HTTP_${response.status}`);
-    return response.json();
+    const raw=await response.text();
+    if(/^\d+\/teacher\/index$/.test(path)) {
+      const branch=path.split('/')[0];
+      const evidence=teacherReads[branch]??={pages:0,maxResponseBytes:0,transport:[]};
+      evidence.pages++;evidence.maxResponseBytes=Math.max(evidence.maxResponseBytes,Buffer.byteLength(raw,'utf8'));
+      await new Promise(resolve=>setTimeout(resolve,250));
+      const probe=await transport(new Request(`${state.endpoint}/v2api/${path}`,{method:'POST',
+        headers:{'content-type':'application/json','x-alfacrm-token':token,...(credentials.appKey?{'x-app-key':credentials.appKey}:{})},
+        body:JSON.stringify(body)}));
+      evidence.transport.push(await summarizeTransportProbe(probe));
+    }
+    return JSON.parse(raw);
   }
   const login = await request('auth/login', {email:credentials.email,api_key:credentials.apiKey});
   if (typeof login.token !== 'string' || login.token.length < 10) throw Error('SOURCE_AUTH_FAILED');
@@ -122,6 +148,7 @@ async function main() {
     report.sourceBranches.push({id,teaching,localBranch:state.branchMappings[id]??null,...summary,customerFields:records[0]?Object.keys(records[0]).sort():[],teacherCount:teachers.length,teachersInBranch:teachers.filter(t=>Array.isArray(t.branch_ids)&&t.branch_ids.map(String).includes(id)).length,groups:groups.map(group=>({id:String(group.id),safeTitle:safeTitle(group.name),grade:String(group.name??'').match(/(?:^|[^0-9])(1[01]|[0-9])[\s_.-]*(?:класс|кл\b)/i)?.[1]??null,year:String(group.name??'').match(/202[0-9].{0,3}202[0-9]/)?.[0]??null,customers:summary.groups[String(group.id)]??0}))});
   }
   report.uniqueIncludedCustomerIds=unique.size;
+  report.teacherTransportReads=teacherReads;
   report.mappedUniqueIncludedCustomerIds=mappedIncluded.size;
   report.mappedUniqueActiveCustomerIds=mappedActive.size;
   const intersections={};for(const branches of mappedMemberships.values())if(branches.size>1){const key=[...branches].sort().join(',');intersections[key]=(intersections[key]??0)+1;}
