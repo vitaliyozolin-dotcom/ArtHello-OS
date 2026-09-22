@@ -93,7 +93,7 @@ def main():
     require(container['State']['Running'] is True,'CENTRAL_UNAVAILABLE')
     image=json.loads(release.docker('image','inspect',container['Image']))[0]
     central_source=image['Config']['Labels'].get('org.opencontainers.image.revision')
-    require(central_source in ('c562a4cdefe14b52cd1ba6cee4b5e9a5183ad052',source),'CENTRAL_SOURCE')
+    require(central_source in (release.PINS['central'][0],source),'CENTRAL_SOURCE')
     report={'controllerSha':source,'centralSource':central_source,'businessDataChanged':False}
     report['source']=capture(['docker','exec','-i',name,'node','--input-type=module','-'],'ALFA_SOURCE_AUDIT=',data=(ROOT/'.github/scripts/alfa-source-audit.mjs').read_bytes())
     report['os']=capture(['docker','run','--rm','--read-only','--network','bridge','--cap-drop','ALL','--security-opt','no-new-privileges:true',
