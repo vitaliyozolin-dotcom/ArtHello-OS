@@ -155,7 +155,7 @@ REPOSITORY = 'vitaliyozolin-dotcom/ArtHello-OS'
 OWNER = 'vitaliyozolin-dotcom'
 PINS = {
     'central': ('a3a755e893027c67156fabc9774bf327d1aa62dc', None),
-    'atlas': ('fdd8316ce50962476dbfee446181ca6c9d71fcc8', '41c5f68a96ec5762ba1db79ab3333b29f4c2d2da'),
+    'atlas': ('41c5f68a96ec5762ba1db79ab3333b29f4c2d2da', '939f5a599a30a490a10bdc1c649a3443c090324a'),
     'school': ('6afc12bb9e98b070f1b50e7cb111551e0618c81d', '404d9b8db843ee9d1fcaaff7c1d157ac5ef00a22'),
 }
 
@@ -389,6 +389,9 @@ def main():
     old = inspect(names[0])
     old_image = json.loads(docker('image', 'inspect', old['Image']))[0]
     require(old_image['Config']['Labels']['org.opencontainers.image.revision'] == PINS[system][0], 'PREDECESSOR')
+    if system == 'atlas':
+        require(old['Id'] == '6f437dfaf2bd562992fc921a2a24d0489ffdc4c944b601e625c7559e77a9358b'
+                and old['Image'] == 'sha256:15f2fc76f8dd0a1c8b40a21105913e6a99273af4939908fe5e3da5e4431cc9aa', 'PREDECESSOR_INVENTORY')
     plan = runtime_plan(old, system, image, image_source, image_tree)
     if system == 'central':
         require(old['Id'] == '36a0f675e0145de6ba4399efaab7bbcb27f0cabfc7cdf9d3c1380af2aba5d7c3', 'PREDECESSOR_INVENTORY')
