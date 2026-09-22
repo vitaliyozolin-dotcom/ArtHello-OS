@@ -1,0 +1,137 @@
+/* Shared visual roles from the ArtHello OS dashboard and compact cards.
+ * Keep this stylesheet in both school diaries; colours remain school-specific.
+ */
+:root {
+  --diary-page-title-size: 32px;
+  --diary-page-title-line: 38px;
+  --diary-section-title-size: 18px;
+  --diary-section-title-line: 24px;
+  --diary-ui-weight: 600;
+  --diary-kpi-label-size: 13px;
+  --diary-kpi-label-line: 17px;
+  --diary-kpi-value-size: 22px;
+  --diary-kpi-value-line: 25px;
+  --diary-kpi-note-size: 11px;
+  --diary-kpi-note-line: 15px;
+  --diary-list-title-size: 12px;
+  --diary-list-title-line: 15px;
+  --diary-list-body-size: 10px;
+  --diary-list-body-line: 14px;
+}
+
+/* Headings and readable controls across Home, People, Calendar and profile. */
+.page-heading h1, .profile-head h1 {
+  font-size: var(--diary-page-title-size);
+  line-height: var(--diary-page-title-line);
+  font-weight: var(--diary-ui-weight);
+  letter-spacing: -.035em;
+}
+.section-title h2, .action-modal h2, .student-profile-section h3 {
+  font-size: var(--diary-section-title-size);
+  line-height: var(--diary-section-title-line);
+  font-weight: var(--diary-ui-weight);
+  letter-spacing: -.02em;
+}
+.page-heading p { line-height: 20px; }
+.eyebrow { font-weight: 600; line-height: 14px; }
+.l0-brand strong { font-weight: 600; line-height: 20px; }
+.l0-nav button { font-weight: 550; line-height: 16px; }
+.primary-btn, .ghost-btn, .tab-row button, .segmented button,
+.calendar-toolbar button, .ranking-tabs button {
+  font-size: 14px;
+  line-height: 20px;
+  font-weight: var(--diary-ui-weight);
+}
+.primary-btn.compact { font-size: 14px; }
+.form-field > span, .schedule-toolbar > label > span,
+.calendar-toolbar label span { font-weight: 600; }
+
+/* Owner dashboard KPI: label 13/17, value 22/25, note 11/15. */
+.metric-card small {
+  font-size: var(--diary-kpi-label-size);
+  line-height: var(--diary-kpi-label-line);
+  font-weight: 400;
+  text-transform: none;
+  letter-spacing: 0;
+}
+.metric-card strong {
+  font-size: var(--diary-kpi-value-size);
+  line-height: var(--diary-kpi-value-line);
+  font-weight: var(--diary-ui-weight);
+}
+.metric-card p {
+  font-size: var(--diary-kpi-note-size);
+  line-height: var(--diary-kpi-note-line);
+  font-weight: 400;
+}
+
+/* OS compact card semantics for student and class rows. */
+.student-directory > button { min-height: 78px; }
+.student-directory > button .l0-avatar-lg {
+  width: 44px;
+  height: 44px;
+  font-size: 12px;
+  font-weight: 600;
+  box-shadow: inset 0 0 0 2px rgba(255,255,255,.27);
+}
+.student-directory strong, .student-mini-list strong, .class-grid strong {
+  font-size: var(--diary-list-title-size);
+  line-height: var(--diary-list-title-line);
+  font-weight: 500;
+}
+.student-directory small, .student-mini-list small, .class-grid small {
+  font-size: var(--diary-list-body-size);
+  line-height: var(--diary-list-body-line);
+  font-weight: 400;
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
+}
+.student-profile-identity strong { font-size: 16px; line-height: 24px; font-weight: 600; }
+.student-profile-facts dd { font-size: 14px; line-height: 20px; font-weight: 600; }
+
+@media (max-width: 600px) {
+  :root { --diary-page-title-size: 30px; --diary-page-title-line: 34px; }
+  .page-heading h1 { font-size: var(--diary-page-title-size); line-height: var(--diary-page-title-line); }
+  .metric-card strong { font-size: 20px; line-height: 25px; }
+  .student-directory > button { min-height: 72px; }
+  /* Icon-only actions remain visually hidden while their accessible name stays. */
+  .page-heading .primary-btn:has(svg) { font-size: 0; line-height: 0; }
+}
+
+/* The approved school design flag has more specific legacy type selectors. */
+html[data-design-code="v1"] .page-heading h1 {
+  font-size: var(--diary-page-title-size);
+  line-height: var(--diary-page-title-line);
+  font-weight: var(--diary-ui-weight);
+  letter-spacing: -.035em;
+}
+html[data-design-code="v1"] .section-title h2 {
+  font-size: var(--diary-section-title-size);
+  line-height: var(--diary-section-title-line);
+  font-weight: var(--diary-ui-weight);
+}
+html[data-design-code="v1"] .metric-card small {
+  font-size: var(--diary-kpi-label-size);
+  line-height: var(--diary-kpi-label-line);
+  font-weight: 400;
+}
+html[data-design-code="v1"] .metric-card strong {
+  font-size: var(--diary-kpi-value-size);
+  line-height: var(--diary-kpi-value-line);
+  font-weight: var(--diary-ui-weight);
+}
+html[data-design-code="v1"] :is(.primary-btn, .ghost-btn) {
+  font-size: 14px;
+  line-height: 20px;
+  font-weight: var(--diary-ui-weight);
+}
+html[data-design-code="v1"] .student-directory > button {
+  min-height: 78px;
+  padding: 14px;
+}
+@media (max-width: 600px) {
+  html[data-design-code="v1"] .metric-card strong { font-size: 20px; line-height: 25px; }
+  html[data-design-code="v1"] .student-directory > button { min-height: 72px; }
+  html[data-design-code="v1"] .page-heading .primary-btn:has(svg) { font-size: 0; line-height: 0; }
+}
