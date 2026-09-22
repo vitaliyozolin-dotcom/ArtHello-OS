@@ -55,7 +55,7 @@ export async function synchronize(client, progress = () => {}) {
       const options = (await call({action:'readDiaryDirectoryOptions',branchId})).diaryOptions;
       const classes = classMappings(branchId, options);
       const preview = (await call({action:'previewDiaryDirectory',branchId,classes})).diaryDirectory;
-      requireValue(preview?.applied === false && preview.students > 0 && preview.classes === classes.length && preview.archived === 0, 'DIARY_PREVIEW_UNCONFIRMED');
+      requireValue(preview?.applied === false && preview.students > 0 && preview.teachers > 0 && preview.classes === classes.length && preview.archived === 0, 'DIARY_PREVIEW_UNCONFIRMED');
       const applied = (await call({action:'applyDiaryDirectory',branchId,token:preview.token})).diaryDirectory;
       requireValue(applied?.applied === true && ['students','families','classes','teachers'].every(key => applied[key] === preview[key]), 'DIARY_APPLY_UNCONFIRMED');
       // The same token must return the same receipt without creating duplicates.

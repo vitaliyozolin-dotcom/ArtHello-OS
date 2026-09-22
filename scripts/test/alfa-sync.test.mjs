@@ -72,3 +72,10 @@ test('audit transport preserves the normal logout redirect',async(t)=>{
   t.mock.method(globalThis,'fetch',async()=>new Response(null,{status:303,headers:{location:'/login'}}));
   await client.logoutAll();
 });
+
+
+test('empty teacher delivery cannot be reported as a completed school synchronization',async()=>{
+  const client=fixture((body,result)=>{if(body.action==='previewDiaryDirectory')result.diaryDirectory.teachers=0;});
+  await assert.rejects(()=>synchronize(client),/DIARY_PREVIEW_UNCONFIRMED/);
+  assert.equal(client.calls.some(c=>c.action==='applyDiaryDirectory'),false);
+});
