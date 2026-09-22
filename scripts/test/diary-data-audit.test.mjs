@@ -12,13 +12,13 @@ test('diary audit distinguishes accepted directory from assignments and lessons 
     CREATE TABLE lessons(class_name TEXT,status TEXT,teacher_user_id TEXT);
     CREATE TABLE central_directory_links(kind TEXT,active INTEGER);
     INSERT INTO school_classes VALUES('1','active');
-    INSERT INTO users VALUES('T1','teacher','active','PRIVATE NAME','confirmed'),('T2','teacher','inactive','PRIVATE NAME','confirmed'),('T3','teacher','active','PRIVATE NAME','vacant');
+    INSERT INTO users VALUES('T1','teacher','active','PRIVATE NAME','confirmed'),('T2','teacher','inactive','PRIVATE NAME','confirmed'),('T3','teacher','active','PRIVATE NAME','vacant'),('T4','teacher','setup','PRIVATE NAME','unconfirmed');
     INSERT INTO lessons VALUES('1','scheduled',NULL),('1','scheduled','T1'),('missing','scheduled','T2'),('1','archived',NULL),('1','scheduled','T3');
     INSERT INTO central_directory_links VALUES('teacher',1),('teacher',1),('teacher',0);
     INSERT INTO teacher_assignments VALUES('confirmed'),('needs_confirmation');`);
   const before=db.prepare('SELECT total_changes() n').get().n;
   const result=auditDiary(db);
-  assert.equal(result.teachers,1);assert.equal(result.directory.teacher,2);
+  assert.equal(result.teachers,1);assert.equal(result.teacherProfiles,2);assert.equal(result.teacherProfilesPending,1);assert.equal(result.directory.teacher,2);
   assert.equal(result.lessons,4);assert.equal(result.lessonsWithoutTeacher,1);
   assert.equal(result.lessonsWithInactiveTeacher,2);assert.equal(result.lessonsWithoutClass,1);
   assert.equal(result.confirmedAssignments,1);assert.equal(result.teacherAssignments,2);

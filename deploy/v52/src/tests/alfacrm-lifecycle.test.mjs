@@ -27,6 +27,7 @@ const adapters = {
   '../../../../lib/request-security': dataModule('export const hasTrustedMutationOrigin=()=>globalThis.__alfaLifecycle.originValid;'),
   '../../../../lib/alfacrm-import': alfaImportUrl,
   '../../../../lib/alfacrm-customer-policy': dataModule(stripTypeScriptTypes(readFileSync(resolve('lib/alfacrm-customer-policy.ts'), 'utf8'), { mode: 'strip' })),
+  '../../../../lib/school-schedule-data': dataModule(readFileSync(resolve('lib/school-schedule-data.ts'),'utf8')),
   '../../../../lib/diary-directory': dataModule(stripTypeScriptTypes(readFileSync(resolve('lib/diary-directory.ts'), 'utf8'), { mode: 'strip' })),
 };
 let source = stripTypeScriptTypes(readFileSync(resolve('app/api/integrations/alfacrm/route.ts'), 'utf8'), { mode: 'transform' })
@@ -372,13 +373,17 @@ for (const branchId of ['BR-SCHOOL','BR-ATLAS-SCHOOL']) test(`diary sender previ
     assert.equal(payload.branchId,branchId);assert.equal(payload.systemId,branchId==='BR-SCHOOL'?'SYS-SCHOOL-1-11':'SYS-SCHOOL-ATLAS');
     assert.equal(payload.snapshot.students[0].id,'C1');assert.equal(payload.access,undefined);
     assert.deepEqual(payload.snapshot.teachers,[{id:'STAFF1',displayName:'Branch teacher'}]);
+    if(branchId==='BR-SCHOOL') assert.equal(payload.snapshot.schedule?.lessons.length,184);
+    else assert.equal(payload.snapshot.schedule,undefined);
     const key=await crypto.subtle.importKey('raw',new TextEncoder().encode(branchId==='BR-SCHOOL'?harness.env.CENTRAL_ACCESS_SECRET:harness.env.ATLAS_CENTRAL_ACCESS_SECRET),{name:'HMAC',hash:'SHA-256'},false,['verify']);
     assert.equal(await crypto.subtle.verify('HMAC',key,Buffer.from(init.headers['x-arthello-signature'],'hex'),new TextEncoder().encode(`${init.headers['x-arthello-timestamp']}.${init.body}`)),true);
     const digest=Buffer.from(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(JSON.stringify(payload.snapshot)))).toString('hex');
-    return Response.json({digest:wrongReceipt?'wrong':digest,sequence:payload.snapshot.sequence,archived:0,applied:payload.action==='apply'});
+    return Response.json({digest:wrongReceipt?'wrong':digest,sequence:payload.snapshot.sequence,archived:0,applied:payload.action==='apply',...(payload.snapshot.schedule?{scheduleLessons:184,unassignedLessons:20}:{})});
   };
   harness.env.DIARY_DIRECTORY_TRANSPORT={fetch:async request=>globalThis.fetch(request.url,{redirect:request.redirect,body:await request.text(),headers:Object.fromEntries(request.headers)})};
-  const body={action:'previewDiaryDirectory',branchId,classes:[{id:'G1',name:'1А',grade:1}]};
+  const classes=[{id:'G1',name:'1А',grade:1}];
+  if(branchId==='BR-SCHOOL') for(let i=2;i<=6;i++) {classes.push({id:'G'+i,name:i+'А',grade:i});sql.prepare("INSERT INTO education_groups(id,name,unit_entity_id,status) VALUES(?,?,'BR-SCHOOL','Активна')").run('G'+i,i+' класс');}
+  const body={action:'previewDiaryDirectory',branchId,classes,includeSchoolSchedule:branchId==='BR-SCHOOL'};
   harness.actor=actor('ADMIN');assert.equal((await post(body)).status,403);harness.actor=actor();
   let response=await post(body);assert.equal(response.status,200,await response.clone().text());
   const first=(await response.json()).diaryDirectory;

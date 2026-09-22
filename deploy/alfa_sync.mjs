@@ -54,14 +54,14 @@ export async function synchronize(client, progress = () => {}) {
     for (const branchId of ['BR-SCHOOL','BR-ATLAS-SCHOOL']) {
       const options = (await call({action:'readDiaryDirectoryOptions',branchId})).diaryOptions;
       const classes = classMappings(branchId, options);
-      const preview = (await call({action:'previewDiaryDirectory',branchId,classes})).diaryDirectory;
-      requireValue(preview?.applied === false && preview.students > 0 && preview.teachers > 0 && preview.classes === classes.length && preview.archived === 0, 'DIARY_PREVIEW_UNCONFIRMED');
+      const preview = (await call({action:'previewDiaryDirectory',branchId,classes,includeSchoolSchedule:branchId==='BR-SCHOOL'})).diaryDirectory;
+      requireValue(preview?.applied === false && preview.students > 0 && preview.teachers > 0 && preview.classes === classes.length && preview.archived === 0 && preview.scheduleLessons === (branchId==='BR-SCHOOL'?184:0), 'DIARY_PREVIEW_UNCONFIRMED');
       const applied = (await call({action:'applyDiaryDirectory',branchId,token:preview.token})).diaryDirectory;
-      requireValue(applied?.applied === true && ['students','families','classes','teachers'].every(key => applied[key] === preview[key]), 'DIARY_APPLY_UNCONFIRMED');
+      requireValue(applied?.applied === true && ['students','families','classes','teachers','scheduleLessons','unassignedLessons'].every(key => applied[key] === preview[key]), 'DIARY_APPLY_UNCONFIRMED');
       // The same token must return the same receipt without creating duplicates.
       const repeated = (await call({action:'applyDiaryDirectory',branchId,token:preview.token})).diaryDirectory;
-      requireValue(repeated?.applied === true && ['students','families','classes','teachers'].every(key => repeated[key] === applied[key]), 'DIARY_REPEAT_UNCONFIRMED');
-      report.diaries[branchId] = Object.fromEntries(['students','families','classes','teachers','archived','applied'].map(key=>[key,applied[key]]));
+      requireValue(repeated?.applied === true && ['students','families','classes','teachers','scheduleLessons','unassignedLessons'].every(key => repeated[key] === applied[key]), 'DIARY_REPEAT_UNCONFIRMED');
+      report.diaries[branchId] = Object.fromEntries(['students','families','classes','teachers','scheduleLessons','unassignedLessons','archived','applied'].map(key=>[key,applied[key]]));
       progress({stage:'diary-complete',branchId,...report.diaries[branchId]});
     }
     return {...report,status:'synchronized-except-deferred-record',autosyncEnabled:false};

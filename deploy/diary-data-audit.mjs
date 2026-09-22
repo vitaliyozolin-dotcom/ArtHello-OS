@@ -10,11 +10,13 @@ export function auditDiary(db) {
     classes: count("SELECT count(*) n FROM school_classes WHERE status='active'"),
     students: count("SELECT count(*) n FROM students WHERE status='active'"),
     teachers: count("SELECT count(*) n FROM users WHERE role='teacher' AND status='active' AND profile_status NOT IN ('demo','vacant')"),
+    teacherProfiles: count("SELECT count(*) n FROM users WHERE role='teacher' AND status IN ('active','setup') AND profile_status NOT IN ('demo','vacant')"),
+    teacherProfilesPending: count("SELECT count(*) n FROM users WHERE role='teacher' AND status IN ('active','setup') AND profile_status NOT IN ('confirmed','demo','vacant')"),
     teacherAssignments: count('SELECT count(*) n FROM teacher_assignments'),
     confirmedAssignments: count("SELECT count(*) n FROM teacher_assignments WHERE status='confirmed'"),
     lessons: count("SELECT count(*) n FROM lessons WHERE status NOT IN ('archived','cancelled')"),
     lessonsWithoutTeacher: count("SELECT count(*) n FROM lessons WHERE status NOT IN ('archived','cancelled') AND (teacher_user_id IS NULL OR teacher_user_id='')"),
-    lessonsWithInactiveTeacher: count("SELECT count(*) n FROM lessons l LEFT JOIN users u ON u.id=l.teacher_user_id WHERE l.status NOT IN ('archived','cancelled') AND l.teacher_user_id IS NOT NULL AND l.teacher_user_id!='' AND (u.id IS NULL OR u.status!='active' OR u.role!='teacher' OR u.profile_status IN ('demo','vacant'))"),
+    lessonsWithInactiveTeacher: count("SELECT count(*) n FROM lessons l LEFT JOIN users u ON u.id=l.teacher_user_id WHERE l.status NOT IN ('archived','cancelled') AND l.teacher_user_id IS NOT NULL AND l.teacher_user_id!='' AND (u.id IS NULL OR u.status NOT IN ('active','setup') OR u.role!='teacher' OR u.profile_status IN ('demo','vacant'))"),
     lessonsWithoutClass: count("SELECT count(*) n FROM lessons l WHERE l.status NOT IN ('archived','cancelled') AND NOT EXISTS(SELECT 1 FROM school_classes c WHERE c.name=l.class_name AND c.status='active')"),
   };
   if(tables.has('central_directory_links')) result.directory=Object.fromEntries(['class','student','teacher','family'].map(kind=>[kind,db.prepare('SELECT count(*) n FROM central_directory_links WHERE kind=? AND active=1').get(kind).n]));
