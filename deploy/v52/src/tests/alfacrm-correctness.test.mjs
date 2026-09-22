@@ -196,6 +196,52 @@ test('unknown customer status stops import before any projection or archival', a
   assert.equal(sql.prepare('SELECT COUNT(*) AS n FROM alfacrm_raw_observations').get().n, observations);
 });
 
+test('owner defers one exact missing-status customer while reconciling the others', async t => {
+  const { sql } = await setup(t);
+  await importSnapshot('families', { '2': [{ id: 1, name: 'Deferred pupil' }, { id: 2, name: 'Departed pupil' }] }, { mappings: { '2': 'BR-NURSERY' } });
+  const before = sql.prepare("SELECT * FROM entities WHERE json_extract(metadata,'$.alfaCustomerId')='1' ORDER BY id").all();
+  const child = before.find(row=>row.entity_type==='Ребёнок').id;
+  const family = before.find(row=>row.entity_type==='Семья').id;
+  sql.prepare("INSERT INTO education_groups(id,unit_entity_id,status) VALUES('keep-group','BR-NURSERY','Активна')").run();
+  sql.prepare("INSERT INTO education_students(id,child_entity_id,family_entity_id,group_id,status) VALUES('STU-A-keep',?,?, 'keep-group','Активен')").run(child,family);
+  const membership = sql.prepare('SELECT * FROM education_students').all();
+  const current = sql.prepare("SELECT * FROM alfacrm_current_records WHERE record_id='1'").all();
+  mockRecords({ '2/customer/index': [{ id: 1, name: 'Deferred pupil', study_status_id: null }, { id: 3, name: 'Current pupil' }] });
+  const preview = await post({ action:'previewModule', module:'families', deferMissingStatusBranch:'2' });
+  assert.equal(preview.status, 200, await preview.clone().text());
+  const p = await preview.json();
+  assert.equal(p.count, 1);
+  assert.equal(p.deferredCount, 1);
+  const applied = await post({ action:'importModule', module:'families', deferMissingStatusBranch:'2', previewToken:p.previewToken });
+  assert.equal(applied.status, 200, await applied.clone().text());
+  const a = await applied.json();
+  assert.equal(a.accepted, 1); assert.equal(a.deferredCount, 1);
+  assert.deepEqual(sql.prepare("SELECT * FROM entities WHERE json_extract(metadata,'$.alfaCustomerId')='1' ORDER BY id").all(), before);
+  assert.deepEqual(sql.prepare("SELECT * FROM alfacrm_current_records WHERE record_id='1'").all(), current);
+  assert.deepEqual(sql.prepare('SELECT * FROM education_students').all(), membership);
+  assert.equal(sql.prepare("SELECT status FROM entities WHERE entity_type='Семья' AND json_extract(metadata,'$.alfaCustomerId')='2'").get().status, 'Архив');
+  assert.equal(sql.prepare("SELECT COUNT(*) n FROM entities WHERE json_extract(metadata,'$.alfaCustomerId')='3'").get().n, 3);
+});
+
+test('deferred customer identity and payload are bound to the owner preview', async t => {
+  const { sql } = await setup(t);
+  const body = { module:'families', deferMissingStatusBranch:'2' };
+  mockRecords({ '2/customer/index': [{ id: 1, name:'Unchanged', study_status_id:null }] });
+  harness.actor = actor('ADMIN');
+  assert.equal((await post({ action:'previewModule', ...body })).status, 403);
+  harness.actor = actor();
+  const response = await post({ action:'previewModule', ...body });
+  assert.equal(response.status, 200, await response.clone().text());
+  const p = await response.json();
+  assert.equal((await post({ action:'importModule', module:'families', previewToken:p.previewToken })).status, 409);
+  mockRecords({ '2/customer/index': [{ id: 2, name:'Replacement', study_status_id:null }] });
+  assert.equal((await post({ action:'importModule', ...body, previewToken:p.previewToken })).status, 409);
+  assert.equal(sql.prepare('SELECT COUNT(*) n FROM entities').get().n, 0);
+  assert.equal(sql.prepare('SELECT COUNT(*) n FROM alfacrm_raw_observations').get().n, 0);
+  mockRecords({ '2/customer/index': [{ id:1, name:'One', study_status_id:null }, { id:2, name:'Two', study_status_id:null }] });
+  assert.equal((await post({ action:'previewModule', ...body })).status, 409);
+});
+
 test('registration creates one linked lead, never an enrolled pupil, across repeat imports', async t => {
   const { sql } = await setup(t);
   mockRecords({ '1/study-status/index': [{ id: 10, name: 'Запись' }],

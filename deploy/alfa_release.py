@@ -154,7 +154,7 @@ ROOT = Path(__file__).resolve().parents[1]
 REPOSITORY = 'vitaliyozolin-dotcom/ArtHello-OS'
 OWNER = 'vitaliyozolin-dotcom'
 PINS = {
-    'central': ('dc390739a09c1fff24ead9f490e339c1eabd3c3d', None),
+    'central': ('c562a4cdefe14b52cd1ba6cee4b5e9a5183ad052', None),
     'atlas': ('f856fb3bd098152bb6b02c4d0273c4c9170b130c', 'fdd8316ce50962476dbfee446181ca6c9d71fcc8'),
     'school': ('54242340f2d9b6a9887d69ecc03520ddf9f7982c', 'e9a2a92edbd150dfeaa4b566a206e6bbb00169ad'),
 }
@@ -391,7 +391,7 @@ def main():
     require(old_image['Config']['Labels']['org.opencontainers.image.revision'] == PINS[system][0], 'PREDECESSOR')
     plan = runtime_plan(old, system, image, image_source, image_tree)
     if system == 'central':
-        require(old['Id'] == '8a243069b733a36e5f15b80df38b9f8990b0a1c06f7c2db4efd60e469e324a21', 'PREDECESSOR_INVENTORY')
+        require(old['Id'] == '92625c15437e064836632fd5e8afe3dee71c5593f7fbfa3415e204c683f62887', 'PREDECESSOR_INVENTORY')
     public_health()
     result = upgrade(old, plan, work, run_key, current_main)
     receipt = {'decision': 'D194', 'state': 'runtime-verified', 'controllerSha': source, 'verificationRuns': runs,

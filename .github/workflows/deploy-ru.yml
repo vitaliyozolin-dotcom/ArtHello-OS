@@ -8,7 +8,7 @@ on:
         required: true
         default: package
         type: choice
-        options: [package, alfa-central, alfa-atlas, alfa-school, alfa-audit]
+        options: [package, alfa-central, alfa-atlas, alfa-school, alfa-audit, alfa-sync]
       ref:
         description: Immutable application commit SHA to package
         required: true
@@ -377,3 +377,38 @@ jobs:
           DEPLOY_USER: ${{ secrets.ARTHELLO_RU_DEPLOY_USER }}
           DEPLOY_PORT: ${{ secrets.ARTHELLO_RU_DEPLOY_PORT }}
         run: python3 -I -B deploy/alfa_audit.py
+
+  sync-alfa:
+    if: >-
+      github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' &&
+      github.sha == inputs.ref && github.repository == 'vitaliyozolin-dotcom/ArtHello-OS' &&
+      github.actor == 'vitaliyozolin-dotcom' && github.triggering_actor == 'vitaliyozolin-dotcom' &&
+      github.run_attempt == 1 && inputs.operation == 'alfa-sync' &&
+      inputs.confirmation == 'SYNC ALFA EXCEPT ONE MISSING STATUS'
+    runs-on: [self-hosted, linux, x64, arthello-gateway]
+    environment: production-ru
+    permissions:
+      contents: read
+      actions: read
+    concurrency:
+      group: gateway-38-55-arthello-production
+      cancel-in-progress: false
+      queue: max
+    timeout-minutes: 30
+    env:
+      RELEASE_SHA: ${{ inputs.ref }}
+      ALFA_SYNC_CONFIRMATION: ${{ inputs.confirmation }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ inputs.ref }}
+          path: alfa-sync-${{ github.run_id }}-${{ github.run_attempt }}
+          persist-credentials: false
+          fetch-depth: 1
+      - name: Synchronize verified clients except the deferred source record
+        working-directory: alfa-sync-${{ github.run_id }}-${{ github.run_attempt }}
+        env:
+          ARTHELLO_OWNER_LOGIN: ${{ secrets.ARTHELLO_FINANCE_IMPORT_LOGIN }}
+          ARTHELLO_OWNER_PASSWORD: ${{ secrets.ARTHELLO_FINANCE_IMPORT_PASSWORD }}
+        run: python3 -I -B deploy/alfa_sync.py
