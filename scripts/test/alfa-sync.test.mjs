@@ -65,3 +65,10 @@ test('audit HTTP errors retain their status even if gateway returned HTML',async
   t.mock.method(globalThis,'fetch',async()=>new Response('<html>gateway</html>',{status:502}));
   await assert.rejects(()=>client.json('POST','https://arthello-188-225-38-55.sslip.io','/api/integrations/alfacrm',{}),/HTTP_502/);
 });
+
+test('audit transport preserves the normal logout redirect',async(t)=>{
+  const {AuditClient}=await import('../../deploy/alfa_reconciliation_audit.mjs');
+  const client=new AuditClient('test','synthetic-password-only');
+  t.mock.method(globalThis,'fetch',async()=>new Response(null,{status:303,headers:{location:'/login'}}));
+  await client.logoutAll();
+});

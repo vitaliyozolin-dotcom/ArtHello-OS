@@ -61,7 +61,7 @@ export class AuditClient extends AtlasOwnerAccessHttpClient {
     const cookie=this.jar.header(url); if(cookie) headers.set('cookie',cookie);
     const response=await fetch(url,{...options,headers,redirect:'manual',signal:AbortSignal.timeout(300_000)});
     this.jar.absorb(url,response.headers);
-    if (!response.ok) throw Error(`HTTP_${response.status}`);
+    if (response.status >= 400) throw Error(`HTTP_${response.status}`);
     return response;
   }
 }
