@@ -228,10 +228,9 @@ test("manual lesson homework is safely published once into the family diary", ()
   assert.doesNotMatch(manualUpdate, /next_ps|следующ/i);
 });
 
-test("setup readiness is separated from daily workspaces", () => {
+test("the director workspace does not show a synthetic setup score", () => {
   assert.match(appSource, /function ManagementPage/);
-  assert.match(appSource, /Данные и готовность/);
-  assert.doesNotMatch(appSource, /Контур запуска|Готовность уровня 0/);
+  assert.doesNotMatch(appSource, /Закрытый тестовый контур|Контур запуска|Готовность уровня 0/);
 });
 
 test("production cutover cannot restore a backup after accepting new writes", () => {

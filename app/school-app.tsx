@@ -442,8 +442,8 @@ function AppShell({ snapshot, activeView, onView, onStudent, helpAction, helpOve
         <section className="l0-workspace">
           <header className="l0-topbar">
             <div className="mobile-brand"><Image src="/school-logo.svg" alt="" width={36} height={36} /><strong>1–11</strong></div>
-            <Link className="return-to-arthello" href="/api/auth/return-to-arthello" aria-label="Вернуться в ArtHello OS" title="Вернуться в ArtHello OS"><Icon name="back" size={17} /><span>Вернуться в ArtHello OS</span></Link>
             <div className="topbar-spacer" />
+            <Link className="return-to-arthello" href="/api/auth/return-to-arthello" aria-label="Вернуться в ArtHello OS" title="Вернуться в ArtHello OS"><Icon name="back" size={17} /><span>Вернуться в ArtHello OS</span></Link>
             {snapshot.students.length > 1 && snapshot.viewer.role === "parent" ? (
               <label className="compact-select"><span>Ребёнок</span><select value={snapshot.selectedStudent?.id ?? ""} onChange={(event) => onStudent(event.target.value)}>{snapshot.students.map((student) => <option key={student.id} value={student.id}>{student.firstName} · {student.className}</option>)}</select></label>
             ) : null}
@@ -607,7 +607,7 @@ function LeadershipDashboard({ snapshot, onView }: { snapshot: SchoolSnapshot; o
       <MetricCard label="Уроки сегодня" value={String(todayLessons.length)} caption="по опубликованному расписанию" icon="clock" tone="violet" onClick={() => onView("schedule")} />
       <MetricCard label="Требуют решения" value={String(unresolvedStaff.length + unapprovedPrograms)} caption="кадры и программы" icon="info" tone="amber" onClick={() => onView(unapprovedPrograms ? "programs" : "people")} />
     </section>
-    <RankingBoard snapshot={snapshot} compact />
+    {snapshot.grades.length > 0 ? <RankingBoard snapshot={snapshot} compact /> : null}
     <section className="two-column-grid leadership-grid">
       <div className="content-card"><SectionTitle title="Ближайшие работы" subtitle="Задания и значимые учебные события" action="Все задания" onAction={() => onView("homework")} /><HomeworkList snapshot={snapshot} limit={4} /></div>
       <div className="content-card"><SectionTitle title="Работа школы" subtitle="Сигналы, которые требуют конкретного действия" /><div className="signal-list">
@@ -760,7 +760,6 @@ function StudyPage({ snapshot, openAction, initialTab = "schedule" }: { snapshot
 
 function CalendarPage({ snapshot, openAction }: { snapshot: SchoolSnapshot; openAction: (kind: ActionKind, preset?: Record<string, string>) => void }) {
   const [mode, setMode] = useState<"week" | "list">("week");
-  const [scope, setScope] = useState<"relevant" | "school">("relevant");
   const canPublish = snapshot.viewer.role === "director" || snapshot.viewer.role === "deputy" || snapshot.viewer.role === "admin";
   const calendarItems = [
     ...snapshot.events.map((event) => ({ id: event.id, type: "Событие", title: event.title, at: event.startsAt, meta: event.location, tone: "orange" })),
@@ -769,9 +768,9 @@ function CalendarPage({ snapshot, openAction }: { snapshot: SchoolSnapshot; open
   return <div className="page-shell">
     <div className="page-heading"><div><span className="eyebrow">Общий календарь</span><h1>Календарь школы</h1><p>Учебные работы, изменения расписания, события и личные напоминания</p></div>{canPublish ? <button className="primary-btn" onClick={() => openAction("event.create")}><Icon name="calendar" size={18} />Создать событие</button> : null}</div>
     {snapshot.academicCalendarPeriods.length ? <section className="calendar-period-strip"><strong>Неучебные периоды:</strong>{snapshot.academicCalendarPeriods.map((period) => <span key={period.id}>{period.title}: {formatDate(period.startsOn)}–{formatDate(period.endsOn)}</span>)}</section> : null}
-    <div className="calendar-toolbar"><Tabs id="calendar-view" value={mode} options={[{ id: "week", label: "Неделя" }, { id: "list", label: "Список" }]} onChange={setMode} ariaLabel="Вид календаря" className="segmented" /><label><span>Показывать</span><select value={scope} onChange={(event) => setScope(event.target.value as typeof scope)}><option value="relevant">Мои события</option><option value="school">Вся школа</option></select></label></div>
+    <div className="calendar-toolbar"><Tabs id="calendar-view" value={mode} options={[{ id: "week", label: "Неделя" }, { id: "list", label: "Список" }]} onChange={setMode} ariaLabel="Вид календаря" className="segmented" /></div>
     <TabPanel tabsId="calendar-view" value={mode}>
-    {mode === "week" ? <section className="calendar-week">{[1, 2, 3, 4, 5, 6].map((day) => <article key={day}><header><strong>{weekdayShort[day]}</strong><span>{snapshot.lessons.filter((lesson) => lesson.weekday === day).length} уроков</span></header><div>{snapshot.lessons.filter((lesson) => lesson.weekday === day).slice(0, 6).map((lesson) => <div className="calendar-lesson" key={lesson.id} style={{ borderLeftColor: lesson.subjectColor }}><small>{lesson.startsAt}</small><strong>{lesson.subjectName}</strong><span>{lesson.className} класс</span></div>)}{!snapshot.lessons.some((lesson) => lesson.weekday === day) ? <p>Нет уроков</p> : null}</div></article>)}</section> : <section className="content-card"><SectionTitle title="Все ближайшие события" subtitle={scope === "school" ? "Школьный контур" : "Только относящиеся к пользователю"} />{calendarItems.length ? <div className="calendar-list">{calendarItems.map((item) => <article key={`${item.type}-${item.id}`}><span className={`calendar-dot ${item.tone}`} /><div><small>{item.type} · {formatDateTime(item.at)}</small><strong>{item.title}</strong><p>{item.meta}</p></div></article>)}</div> : <EmptyState title="Календарь пока пуст" text="После публикации расписания и событий они появятся здесь автоматически." icon="calendar" />}</section>}
+    {mode === "week" ? snapshot.lessons.length ? <section className="calendar-week">{[1, 2, 3, 4, 5, 6].map((day) => <article key={day}><header><strong>{weekdayShort[day]}</strong><span>{snapshot.lessons.filter((lesson) => lesson.weekday === day).length} уроков</span></header><div>{snapshot.lessons.filter((lesson) => lesson.weekday === day).slice(0, 6).map((lesson) => <div className="calendar-lesson" key={lesson.id} style={{ borderLeftColor: lesson.subjectColor }}><small>{lesson.startsAt}</small><strong>{lesson.subjectName}</strong><span>{lesson.className} класс</span></div>)}{!snapshot.lessons.some((lesson) => lesson.weekday === day) ? <p>Нет уроков</p> : null}</div></article>)}</section> : <section className="content-card"><EmptyState title="Расписание пока не опубликовано" text="Уроки появятся здесь после составления расписания." icon="calendar" /></section> : <section className="content-card"><SectionTitle title="События и задания" subtitle="По школе и вашим доступным классам" />{calendarItems.length ? <div className="calendar-list">{calendarItems.map((item) => <article key={`${item.type}-${item.id}`}><span className={`calendar-dot ${item.tone}`} /><div><small>{item.type} · {formatDateTime(item.at)}</small><strong>{item.title}</strong><p>{item.meta}</p></div></article>)}</div> : <EmptyState title="Календарь пока пуст" text="После публикации расписания и событий они появятся здесь автоматически." icon="calendar" />}</section>}
     </TabPanel>
     <section className="content-card notifications-card"><SectionTitle title="Уведомления" subtitle="Каждое ведёт на конкретный объект" />{snapshot.notifications.length ? <div className="notification-list">{snapshot.notifications.map((item) => <article key={item.id} className={cn(!item.readAt && "unread")}><span><Icon name={item.critical ? "info" : "bell"} size={17} /></span><div><strong>{item.title}</strong><p>{item.body}</p><small>{formatDateTime(item.createdAt)}</small></div></article>)}</div> : <EmptyState title="Новых уведомлений нет" text="Критические изменения расписания появятся здесь и не потеряются." icon="bell" />}</section>
   </div>;
@@ -908,9 +907,8 @@ function PeoplePage({ snapshot }: { snapshot: SchoolSnapshot }) {
 }
 
 function ManagementPage({ snapshot, openAction }: { snapshot: SchoolSnapshot; openAction: (kind: ActionKind, preset?: Record<string, string>) => void }) {
-  const done = snapshot.setup.checklist.filter((item) => item.done).length;
   if (snapshot.viewer.role === "tech_admin") return <TechnicalAdminPage snapshot={snapshot} />;
-  return <div className="management-page"><AdminManagement snapshot={snapshot} openAction={openAction} /><section className="page-shell readiness-page"><div className="page-heading"><div><span className="eyebrow">Настройка системы</span><h1>Данные и готовность</h1><p>Этот экран вынесен из ежедневного рабочего стола</p></div></div><section className="admin-readiness"><div><span className="eyebrow light">Закрытый тестовый контур</span><strong>{done} из {snapshot.setup.checklist.length}</strong><p>Каждый пункт содержит ответственного и ведёт к конкретному действию. Родители не получат доступ до закрытия правового и авторизационного блокеров.</p><div className="readiness-track"><span style={{ width: `${Math.round(done / snapshot.setup.checklist.length * 100)}%` }} /></div></div><ul>{snapshot.setup.checklist.map((item) => <li key={item.id} className={cn(item.done && "done")}><span>{item.done ? <Icon name="check" size={15} /> : null}</span>{item.label}</li>)}</ul></section></section></div>;
+  return <div className="management-page"><AdminManagement snapshot={snapshot} openAction={openAction} /></div>;
 }
 
 function TechnicalAdminPage({ snapshot }: { snapshot: SchoolSnapshot }) {
