@@ -98,3 +98,40 @@
   /* Icon-only actions remain visually hidden while their accessible name stays. */
   .page-heading .primary-btn:has(svg) { font-size: 0; line-height: 0; }
 }
+
+/* The approved school design flag has more specific legacy type selectors. */
+html[data-design-code="v1"] .page-heading h1 {
+  font-size: var(--diary-page-title-size);
+  line-height: var(--diary-page-title-line);
+  font-weight: var(--diary-ui-weight);
+  letter-spacing: -.035em;
+}
+html[data-design-code="v1"] .section-title h2 {
+  font-size: var(--diary-section-title-size);
+  line-height: var(--diary-section-title-line);
+  font-weight: var(--diary-ui-weight);
+}
+html[data-design-code="v1"] .metric-card small {
+  font-size: var(--diary-kpi-label-size);
+  line-height: var(--diary-kpi-label-line);
+  font-weight: 400;
+}
+html[data-design-code="v1"] .metric-card strong {
+  font-size: var(--diary-kpi-value-size);
+  line-height: var(--diary-kpi-value-line);
+  font-weight: var(--diary-ui-weight);
+}
+html[data-design-code="v1"] :is(.primary-btn, .ghost-btn) {
+  font-size: 14px;
+  line-height: 20px;
+  font-weight: var(--diary-ui-weight);
+}
+html[data-design-code="v1"] .student-directory > button {
+  min-height: 78px;
+  padding: 14px;
+}
+@media (max-width: 600px) {
+  html[data-design-code="v1"] .metric-card strong { font-size: 20px; line-height: 25px; }
+  html[data-design-code="v1"] .student-directory > button { min-height: 72px; }
+  html[data-design-code="v1"] .page-heading .primary-btn:has(svg) { font-size: 0; line-height: 0; }
+}
