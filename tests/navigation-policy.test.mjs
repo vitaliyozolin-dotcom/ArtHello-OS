@@ -21,6 +21,9 @@ test("the school shell uses the policy and no longer renders the empty parent ca
   const source = readFileSync(new URL("../app/school-app.tsx", import.meta.url), "utf8");
   assert.match(source, /showLeadershipParentPreview = shouldShowLeadershipParentPreview/);
   assert.match(source, /<h2>Предпросмотр для родителя<\/h2>/);
+  assert.match(source, /showLeadershipParentPreview && parentPreviewOpen/);
+  assert.match(source, /disabled=\{!previewSelection\}/);
+  assert.doesNotMatch(source, /previewSelection \|\| snapshot\.students\[0\]\.id/);
   assert.doesNotMatch(source, /<h2>Кабинет родителя<\/h2>/);
   assert.doesNotMatch(source, /Нет доступных детей для предпросмотра/);
 });

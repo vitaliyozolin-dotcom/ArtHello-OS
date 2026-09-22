@@ -111,6 +111,11 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .notification-button > span { width: 7px; height: 7px; border-radius: 50%; background: var(--orange); box-shadow: 0 0 0 2px white; position: absolute; right: 7px; top: 7px; }
 .l0-main { min-width: 0; height: 100%; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: #d2cec3 transparent; }
 .page-shell { width: 100%; min-height: 100%; margin: 0; padding: 32px clamp(28px, 2.5vw, 48px) 80px; display: flex; flex-direction: column; gap: 22px; }
+.parent-preview-tools { min-height: 0; padding-bottom: 0; }
+.parent-preview-tools .hero-actions { align-items: end; }
+.parent-preview-tools .hero-actions label { min-width: min(100%, 440px); display: grid; gap: 6px; font-size: 12px; font-weight: 700; }
+.parent-preview-tools .hero-actions select { min-height: 43px; width: 100%; border: 1px solid var(--line); border-radius: 12px; padding: 0 12px; background: white; color: var(--ink); }
+.parent-preview-tools .ghost-btn:disabled { opacity: .5; cursor: not-allowed; }
 .l0-bottom-nav { display: none; }
 
 .l0-avatar { flex: 0 0 auto; border-radius: 50%; color: white; display: inline-grid; place-items: center; font-weight: 850; letter-spacing: -.2px; background: var(--orange); box-shadow: inset 0 0 0 3px rgba(255,255,255,.24); }
@@ -334,7 +339,8 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .schedule-toolbar { margin-bottom: 16px; padding: 12px; border: 1px solid var(--line); border-radius: 16px; background: #faf9f6; display: flex; align-items: flex-end; justify-content: space-between; gap: 12px; }
 .schedule-toolbar > label { min-width: 230px; display: flex; flex-direction: column; gap: 5px; }
 .schedule-toolbar > label > span { color: var(--muted); font-size: 9px; font-weight: 850; text-transform: uppercase; letter-spacing: .05em; }
-.schedule-toolbar select { min-height: 43px; border: 1px solid var(--line); border-radius: 12px; padding: 0 11px; background: white; color: var(--ink); font-size: 12px; font-weight: 750; }
+.schedule-toolbar select { min-height: 43px; border: 1px solid var(--line); border-radius: 12px; padding: 0 11px; background: white; color: var(--ink); font-size: 12px; font-weight: 750; cursor: pointer; }
+.schedule-toolbar select:focus-visible, .parent-preview-tools select:focus-visible { outline: 2px solid var(--orange); outline-offset: 2px; }
 .schedule-toolbar > div { display: flex; gap: 8px; }
 .day-switch { display: grid; grid-template-columns: repeat(6, 1fr); gap: 8px; margin-bottom: 24px; }
 .day-switch button { min-height: 62px; border: 1px solid var(--line); border-radius: 15px; background: #faf9f6; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; cursor: pointer; }
