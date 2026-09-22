@@ -156,7 +156,7 @@ OWNER = 'vitaliyozolin-dotcom'
 PINS = {
     'central': ('a3a755e893027c67156fabc9774bf327d1aa62dc', None),
     'atlas': ('04a080bb247f1b5dbadfe504a59ae475bd09b6d1', '21daada019ffebb6b8d30de48f268ed3163c6c3e'),
-    'school': ('404d9b8db843ee9d1fcaaff7c1d157ac5ef00a22', '5876accedbdf3758971fdc383f1e0fad8c32a158'),
+    'school': ('5876accedbdf3758971fdc383f1e0fad8c32a158', '5802a5e6fb6d254f1f67a3776ae0c47d43a68859'),
 }
 
 
