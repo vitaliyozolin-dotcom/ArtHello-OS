@@ -301,7 +301,7 @@ jobs:
             sleep 2
           done
           test "$ready" = 1
-          docker exec "$container" node -e 'fetch("http://127.0.0.1:3000/").then(async response => { const html = await response.text(); if (!response.ok || !html.includes("data-design-code=\\"v1\\"")) process.exit(1); }).catch(() => process.exit(1))'
+          docker exec "$container" node -e 'fetch("http://127.0.0.1:3000/").then(async response => { const html = await response.text(); if (!response.ok || !html.includes("data-design-code=\"v1\"")) process.exit(1); }).catch(() => process.exit(1))'
           docker exec "$container" node /run/directory-smoke.mjs
           docker exec "$container" node --input-type=module -e "import {DatabaseSync} from 'node:sqlite'; const db=new DatabaseSync('/data/isolated-ci.sqlite',{readOnly:true}); const row=db.prepare(\"SELECT count(*) n FROM students WHERE id='CI-C1' AND status='archived'\").get(); if(row.n!==1) throw Error('pupil projection'); if(db.prepare(\"SELECT count(*) n FROM central_directory_links WHERE kind='student'\").get().n!==1) throw Error('duplicate identity'); if(db.prepare('PRAGMA integrity_check').get().integrity_check!=='ok') throw Error('integrity'); db.close();"
           mkdir -p "$RUNNER_TEMP/directory-bundle"
