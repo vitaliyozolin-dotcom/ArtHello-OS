@@ -3,6 +3,7 @@ import "./design-tokens.css";
 import "./themes/student.css";
 import "./globals.css";
 import "./mobile-polish.css";
+import "./arthello-typography.css";
 
 export const metadata: Metadata = {
   title: "Школа 1–11",
