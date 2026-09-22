@@ -91,6 +91,20 @@ async function main() {
     const records=await paged(`${id}/customer/index`,{is_study:1,removed:0,withGroups:true});
     const groups=await paged(`${id}/group/index`,{removed:0});
     const teachers=await paged(`${id}/teacher/index`,{removed:0});
+    let teaching;
+    if(['8','10'].includes(id)) {
+      const period={date_from:'2026-09-01',date_to:'2026-09-30'};
+      try {
+        const lessons=[];
+        for(const status of [1,2,3]) lessons.push(...await paged(`${id}/lesson/index`,{...period,status}));
+        const regular=await paged(`${id}/regular-lesson/index`,period);
+        const classIds=new Set(groups.filter(g=>/^(\d{1,2})(?:[-‑–][а-яa-z]+)?\s+класс(?:\s|$)/iu.test(String(g.name??''))).map(g=>String(g.id)));
+        const classLessons=lessons.filter(l=>Array.isArray(l.group_ids)&&l.group_ids.some(g=>classIds.has(String(g))));
+        teaching={period,lessons:lessons.length,byStatus:Object.fromEntries([1,2,3].map(status=>[status,lessons.filter(l=>Number(l.status)===status).length])),
+          schoolClassLessons:classLessons.length,schoolClassLessonsWithTeachers:classLessons.filter(l=>Array.isArray(l.teacher_ids)&&l.teacher_ids.length>0).length,
+          regularLessons:regular.length,schoolClassRegular:regular.filter(l=>l.related_class==='Group'&&classIds.has(String(l.related_id))).length};
+      } catch(error) { teaching={period,status:'blocked',reason:/^[A-Z_0-9]{3,70}$/.test(error?.message??'')?error.message:'UNCONFIRMED'}; }
+    }
     const summary=summarizeBranch(records,dictionary,id);
     const names=new Map(dictionary.map(row=>[String(row.id),row.name]));
     for(const row of records)if(Array.isArray(row.branch_ids)&&row.branch_ids.map(String).includes(id)&&['Активен','Активен ШКОЛА','Открыто','Разовое посещение','Запись'].includes(names.get(String(row.study_status_id))))unique.add(String(row.id));
@@ -102,7 +116,7 @@ async function main() {
       mappedIncluded.add(customerId);const memberships=mappedMemberships.get(customerId)??new Set();memberships.add(id);mappedMemberships.set(customerId,memberships);
     }
     const safeTitle = value => String(value??'').replace(/\d{5,}/g,'*').replace(/[a-zа-яё]+/gi,word=>['класс','кл','атлас','школа','лет','мини','сад','садик','группа','нулевой','первый','второй','третий','четвертый','подготовка','школе','к','младшая','старшая','средняя','подготовительная'].includes(word.toLowerCase())?word:'*');
-    report.sourceBranches.push({id,localBranch:state.branchMappings[id]??null,...summary,customerFields:records[0]?Object.keys(records[0]).sort():[],teacherCount:teachers.length,teachersInBranch:teachers.filter(t=>Array.isArray(t.branch_ids)&&t.branch_ids.map(String).includes(id)).length,groups:groups.map(group=>({id:String(group.id),safeTitle:safeTitle(group.name),grade:String(group.name??'').match(/(?:^|[^0-9])(1[01]|[0-9])[\s_.-]*(?:класс|кл\b)/i)?.[1]??null,year:String(group.name??'').match(/202[0-9].{0,3}202[0-9]/)?.[0]??null,customers:summary.groups[String(group.id)]??0}))});
+    report.sourceBranches.push({id,teaching,localBranch:state.branchMappings[id]??null,...summary,customerFields:records[0]?Object.keys(records[0]).sort():[],teacherCount:teachers.length,teachersInBranch:teachers.filter(t=>Array.isArray(t.branch_ids)&&t.branch_ids.map(String).includes(id)).length,groups:groups.map(group=>({id:String(group.id),safeTitle:safeTitle(group.name),grade:String(group.name??'').match(/(?:^|[^0-9])(1[01]|[0-9])[\s_.-]*(?:класс|кл\b)/i)?.[1]??null,year:String(group.name??'').match(/202[0-9].{0,3}202[0-9]/)?.[0]??null,customers:summary.groups[String(group.id)]??0}))});
   }
   report.uniqueIncludedCustomerIds=unique.size;
   report.mappedUniqueIncludedCustomerIds=mappedIncluded.size;

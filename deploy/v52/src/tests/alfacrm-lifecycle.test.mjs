@@ -364,6 +364,7 @@ for (const branchId of ['BR-SCHOOL','BR-ATLAS-SCHOOL']) test(`diary sender previ
   harness.env.ATLAS_PUBLIC_ORIGIN='https://atlas.test';harness.env.ATLAS_CENTRAL_ACCESS_SECRET='a'.repeat(40);
   sql.prepare('UPDATE education_groups SET unit_entity_id=? WHERE id=?').run(branchId,'G1');
   sql.prepare("INSERT INTO entities(id,entity_type,display_name,status,metadata) VALUES('STAFF1','Сотрудник','Branch teacher','Активна',?)").run(JSON.stringify({localBranchId:branchId}));
+  sql.exec("INSERT INTO hr_employees(id,position_id) VALUES('STAFF1','PEDAGOG')");
   const calls=[]; let wrongReceipt=false;
   globalThis.fetch=async(url,init)=>{
     assert.equal(url,`${branchId==='BR-SCHOOL'?'https://school.test':'https://atlas.test'}/api/internal/directory-sync`);assert.equal(init.redirect,'manual');

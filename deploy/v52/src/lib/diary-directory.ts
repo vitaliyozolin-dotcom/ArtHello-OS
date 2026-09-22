@@ -1,7 +1,7 @@
 export type DirectoryClass = { id: string; name: string; grade: number; localId?: string };
 type Group = { id: string; branchId: string; status: string; teacherId: string };
 type Membership = { childId: string; familyId: string; groupId: string; displayName: string };
-type Teacher = { id: string; displayName: string; metadata?: string };
+type Teacher = { id: string; displayName: string; metadata?: string; positionId?: string };
 const validId = (id: unknown): id is string => typeof id === 'string' && /^[A-Za-z0-9:_-]{1,100}$/.test(id);
 
 export function buildDiaryDirectory(branchId: string, sequence: number, classes: DirectoryClass[], groups: Group[], memberships: Membership[], teachers: Teacher[]) {
@@ -27,6 +27,7 @@ export function buildDiaryDirectory(branchId: string, sequence: number, classes:
     if(!meta || typeof meta!=='object' || Array.isArray(meta)) return false;
     // A current canonical employee may have an archived assignment in this school.
     // Explicit branch evidence takes precedence over a stale group teacher slot.
+    if(t.positionId!=='PEDAGOG' && !teacherIds.has(t.id)) return false;
     if(Array.isArray(meta.branchAssignments)) return meta.branchAssignments.some(b=>b && b.localBranchId===branchId && b.active===true);
     if(typeof meta.localBranchId==='string' && meta.localBranchId) return meta.localBranchId===branchId;
     return teacherIds.has(t.id);

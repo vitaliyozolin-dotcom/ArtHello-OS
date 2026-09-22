@@ -972,7 +972,7 @@ async function directorySnapshot(branchId: string, sequence: number, classes: Di
   const memberships = (await env.DB.prepare(`SELECT s.child_entity_id AS childId,s.family_entity_id AS familyId,s.group_id AS groupId,c.display_name AS displayName
     FROM education_students s JOIN education_groups g ON g.id=s.group_id JOIN entities c ON c.id=s.child_entity_id JOIN entities f ON f.id=s.family_entity_id
     WHERE g.unit_entity_id=? AND g.status='Активна' AND s.status='Активен' AND c.status='Активна' AND f.status='Активна' ORDER BY s.id`).bind(branchId).all<{childId:string;familyId:string;groupId:string;displayName:string}>()).results ?? [];
-  const teachers = (await env.DB.prepare("SELECT id,display_name AS displayName,metadata FROM entities WHERE entity_type='Сотрудник' AND status='Активна' ORDER BY id").all<{id:string;displayName:string;metadata:string}>()).results ?? [];
+  const teachers = (await env.DB.prepare("SELECT e.id,e.display_name AS displayName,e.metadata,h.position_id AS positionId FROM entities e LEFT JOIN hr_employees h ON h.id=e.id WHERE e.entity_type='Сотрудник' AND e.status='Активна' ORDER BY e.id").all<{id:string;displayName:string;metadata:string;positionId:string}>()).results ?? [];
   return buildDiaryDirectory(branchId, sequence, classes, groups, memberships, teachers);
 }
 

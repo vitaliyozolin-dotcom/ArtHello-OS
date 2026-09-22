@@ -20,10 +20,11 @@ test('duplicate memberships collapse; conflicting classes or families stop the s
 
 test('school staff includes confirmed branch teachers without a group slot and respects archived assignments',()=>{
   const staff = [
-    {id:'T3',displayName:'School specialist',metadata:JSON.stringify({localBranchId:'BR-SCHOOL'})},
-    {id:'T4',displayName:'Atlas specialist',metadata:JSON.stringify({localBranchId:'BR-ATLAS-SCHOOL'})},
-    {id:'T5',displayName:'Shared teacher',metadata:JSON.stringify({localBranchId:'BR-NURSERY',branchAssignments:[{localBranchId:'BR-SCHOOL',active:true},{localBranchId:'BR-NURSERY',active:true}]})},
-    {id:'T1',displayName:'Departed school teacher',metadata:JSON.stringify({localBranchId:'BR-SCHOOL',branchAssignments:[{localBranchId:'BR-SCHOOL',active:false},{localBranchId:'BR-NURSERY',active:true}]})},
+    {id:'ADMIN',displayName:'School administrator',positionId:'ADMIN',metadata:JSON.stringify({localBranchId:'BR-SCHOOL'})},
+    {id:'T3',displayName:'School specialist',positionId:'PEDAGOG',metadata:JSON.stringify({localBranchId:'BR-SCHOOL'})},
+    {id:'T4',displayName:'Atlas specialist',positionId:'PEDAGOG',metadata:JSON.stringify({localBranchId:'BR-ATLAS-SCHOOL'})},
+    {id:'T5',displayName:'Shared teacher',positionId:'PEDAGOG',metadata:JSON.stringify({localBranchId:'BR-NURSERY',branchAssignments:[{localBranchId:'BR-SCHOOL',active:true},{localBranchId:'BR-NURSERY',active:true}]})},
+    {id:'T1',displayName:'Departed school teacher',positionId:'PEDAGOG',metadata:JSON.stringify({localBranchId:'BR-SCHOOL',branchAssignments:[{localBranchId:'BR-SCHOOL',active:false},{localBranchId:'BR-NURSERY',active:true}]})},
   ];
   assert.deepEqual(buildDiaryDirectory('BR-SCHOOL',1,classes,groups,memberships,staff).teachers.map(t=>t.id),['T3','T5']);
 });
