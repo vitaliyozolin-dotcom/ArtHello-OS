@@ -32,6 +32,7 @@ export type StudentRecord = {
 };
 
 export type UserRecord = {
+  identitySource?: string;
   id: string;
   email: string;
   displayName: string;

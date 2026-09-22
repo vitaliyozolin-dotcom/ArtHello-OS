@@ -675,9 +675,9 @@ async function loadSnapshot(
     : viewer.role === "methodist"
       ? await rows<SchoolSnapshot["users"][number]>(
           `SELECT id, '' AS email, display_name AS displayName, role,
-          NULL AS linkedStudentId, status, profile_status AS profileStatus,
+          NULL AS linkedStudentId, status, profile_status AS profileStatus, identity_source AS identitySource,
           '' AS notes
-          FROM users WHERE role = 'teacher' AND status = 'active'
+          FROM users WHERE role = 'teacher' AND status IN ('active','setup')
           ORDER BY display_name`,
         )
       : [];

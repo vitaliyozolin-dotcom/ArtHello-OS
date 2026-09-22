@@ -1,3 +1,4 @@
+import { planDirectorySchedule } from './directory-schedule.mjs';
 import { createHash } from 'node:crypto';
 
 const id = value => typeof value === 'string' && /^[A-Za-z0-9:_-]{1,100}$/.test(value);
@@ -16,9 +17,9 @@ function index(rows) {
   return map;
 }
 
-// The caller serializes requests. No users, credentials, invitations or lesson
-// history are created, removed or changed by this directory projection.
-export async function applyDirectorySnapshot(db, input, apply) {
+// The caller serializes requests. Imported teacher profiles remain in setup:
+// no credentials, invitations, account activation or lesson history are created.
+export async function applyDirectorySnapshot(db, input, apply, context) {
   requireValue(input?.version === 1 && input.complete === true && Number.isSafeInteger(input.sequence) && input.sequence > 0);
   const classes=index(input.classes), families=index(input.families), students=index(input.students), teachers=index(input.teachers);
   const names=new Set();
@@ -32,7 +33,7 @@ export async function applyDirectorySnapshot(db, input, apply) {
   const byKey=new Map(links.map(row=>[`${row.kind}:${row.central_id}`,row]));
   const statements=[];
   const linked=(kind,row,localId)=>statements.push(db.prepare(`INSERT INTO central_directory_links(kind,central_id,local_id,payload,active) VALUES(?,?,?,?,1)
-    ON CONFLICT(kind,central_id) DO UPDATE SET payload=excluded.payload,active=1`).bind(kind,row.id,localId,JSON.stringify(row)));
+    ON CONFLICT(kind,central_id) DO UPDATE SET local_id=excluded.local_id,payload=excluded.payload,active=1`).bind(kind,row.id,localId,JSON.stringify(row)));
   const localClasses=new Map();
   const localClassIds=new Set();
   for(const row of classes.values()) {
@@ -65,16 +66,36 @@ export async function applyDirectorySnapshot(db, input, apply) {
       .bind(row.id,row.firstName,row.lastName,localClasses.get(row.classId)));
     linked('student',row,row.id);
   }
-  for(const [kind,rows] of [['family',families],['teacher',teachers]]) for(const row of rows.values()) linked(kind,row,row.id);
+  for(const row of families.values()) linked('family',row,row.id);
+  const users=(await db.prepare('SELECT id,display_name,role,status,identity_source,password_hash,central_user_id FROM users').all()).results;
+  for(const row of teachers.values()) {
+    const localId='DIR-'+createHash('sha256').update(row.id).digest('hex').slice(0,32);
+    const binding=byKey.get(`teacher:${row.id}`);
+    requireValue(!binding || binding.local_id===row.id || binding.local_id===localId);
+    const existing=users.find(user=>user.id===localId);
+    requireValue(!existing || (existing.identity_source==='central_directory' && existing.role==='teacher'));
+    // Full-name equality is review evidence, never proof of identity.
+    const duplicate=users.some(user=>user.id!==localId && user.role==='teacher' && user.status!=='archived' && user.display_name?.trim().toLocaleLowerCase('ru')===row.displayName.trim().toLocaleLowerCase('ru'));
+    const note=duplicate
+      ? 'Учитель из ОС. Есть карточка с таким ФИО: подтвердите сопоставление с ней. Автоматическое объединение не выполнялось.'
+      : 'Учитель из ОС. Подтвердите предметы и классы в назначениях. Доступ к дневнику оформляется отдельно.';
+    if(!existing) statements.push(db.prepare(`INSERT INTO users(id,email,display_name,role,status,profile_status,notes,password_state,identity_source)
+      VALUES(?,?,?,'teacher','setup','unconfirmed',?,'pending','central_directory')`).bind(localId,localId.toLowerCase()+'@invalid',row.displayName,note));
+    else if(!existing.password_hash && !existing.central_user_id && ['setup','archived'].includes(existing.status)) statements.push(db.prepare("UPDATE users SET display_name=?,status='setup',updated_at=CURRENT_TIMESTAMP WHERE id=?").bind(row.displayName,localId));
+    linked('teacher',row,localId);
+  }
   for(const link of links) {
     const current={class:classes,student:students,family:families,teacher:teachers}[link.kind];
     requireValue(current);
     if(!current.has(link.central_id)) {
       statements.push(db.prepare('UPDATE central_directory_links SET active=0 WHERE kind=? AND central_id=?').bind(link.kind,link.central_id));
+      if(link.kind==='teacher') statements.push(db.prepare("UPDATE users SET status='archived',updated_at=CURRENT_TIMESTAMP WHERE id=? AND identity_source='central_directory' AND status='setup' AND password_hash IS NULL AND central_user_id IS NULL").bind(link.local_id));
       if(link.kind==='student' && link.active) { archived++; statements.push(db.prepare("UPDATE students SET status='archived',updated_at=CURRENT_TIMESTAMP WHERE id=?").bind(link.local_id)); }
     }
   }
-  const result={classes:classes.size,students:students.size,families:families.size,teachers:teachers.size,archived,sequence:input.sequence,digest,applied:apply};
+  const schedule=await planDirectorySchedule(db,input.schedule,classes,context);
+  statements.push(...schedule.statements);
+  const result={...schedule.receipt,classes:classes.size,students:students.size,families:families.size,teachers:teachers.size,archived,sequence:input.sequence,digest,applied:apply};
   if(apply && !(previous?.sequence===input.sequence && previous.digest===digest)) {
     // Check the observed version inside the same write transaction. A second
     // process cannot apply a stale plan after another snapshot has committed.
