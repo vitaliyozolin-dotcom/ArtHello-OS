@@ -11,7 +11,7 @@ try:
         row=json.loads(docker('inspect',container_id))[0]
         image=json.loads(docker('image','inspect',row['Image']))[0]
         source=image.get('Config',{}).get('Labels',{}).get('org.opencontainers.image.revision')
-        if source not in ('54242340f2d9b6a9887d69ecc03520ddf9f7982c','e9a2a92edbd150dfeaa4b566a206e6bbb00169ad','0cb894eda21c6a446b804e51c8cac8c54af9b5cd','4f47f5f7707e73e9a02490fe9209f0129915cc00'): continue
+        if source not in ('54242340f2d9b6a9887d69ecc03520ddf9f7982c','e9a2a92edbd150dfeaa4b566a206e6bbb00169ad','0cb894eda21c6a446b804e51c8cac8c54af9b5cd','4f47f5f7707e73e9a02490fe9209f0129915cc00','8e6be4f4bc3af6333fc7761ef5501544edaa1acd'): continue
         config=row['Config']; host=row['HostConfig']
         candidates.append({'containerId':row['Id'],'image':row['Image'],'source':source,
           'readOnlyRoot':host['ReadonlyRootfs'],'portBindingsPresent':bool(host.get('PortBindings')),'networkCount':len(row['NetworkSettings']['Networks']),
