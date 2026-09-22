@@ -34,6 +34,17 @@ test("school structure contains classes 1 through 6 and the supplied staff", () 
   ]) assert.match(apiSource, new RegExp(teacher));
 });
 
+test("operational people directory opens with pupils and exposes class membership", () => {
+  assert.match(appSource, /useState<"students" \| "classes" \| "teachers">\("students"\)/);
+  assert.match(appSource, /id="people-directory"/);
+  assert.match(appSource, /label: `Ученики · \$\{snapshot\.students\.length\}`/);
+  assert.match(appSource, /label: `Классы · \$\{snapshot\.classes\.length\}`/);
+  assert.match(appSource, /value=\{classFilter\}/);
+  assert.match(appSource, /student\.className === classFilter/);
+  assert.match(appSource, /setClassFilter\(schoolClass\.name\); setDirectoryTab\("students"\)/);
+  assert.match(appSource, /setSelectedStudentId\(student\.id\)/);
+});
+
 test("uncertain staff records remain explicitly uncertain", () => {
   assert.match(apiSource, /Алексюнина Анастасия Витальевна[\s\S]*?profileStatus: "unconfirmed"/);
   assert.match(apiSource, /Куратор №2[\s\S]*?profileStatus: "vacant"/);
