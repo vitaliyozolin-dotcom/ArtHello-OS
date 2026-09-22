@@ -13,8 +13,8 @@ ROOT=Path(__file__).resolve().parents[1]
 spec=importlib.util.spec_from_file_location('release',ROOT/'deploy/alfa_release.py')
 release=importlib.util.module_from_spec(spec);spec.loader.exec_module(release)
 require=release.require
-PREDECESSOR='ab4e1087aed71da94b2cefc7484d381e2b552b79fda3ffcda3989029f4e62d59'
-PREDECESSOR_IMAGE='sha256:ed434228e3e9306ed0f8bdc4a3a1285360d018605556fc7e5e9e6a54dcdb30a2'
+PREDECESSOR='814d37b2b44a661ed16fc372008e6a7766e73efa2c897eacda08dc3be7e04e74'
+PREDECESSOR_IMAGE='sha256:6c4373f765685804fec989a467396ff9c1623ec774dabe39a071372fcf126fc5'
 
 def main(source,run_key,verification_run):
     os.umask(0o077)
