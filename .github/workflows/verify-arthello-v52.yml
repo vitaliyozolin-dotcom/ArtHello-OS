@@ -5,6 +5,10 @@ on:
     paths:
       - .github/scripts/alfa-source-audit.mjs
       - scripts/test/alfa-source-transport-audit.test.mjs
+      - deploy/alfa_release.py
+      - deploy/school_release.py
+      - deploy/school_release_remote.py
+      - deploy/school_inventory.py
       - deploy/v44/src/**
       - deploy/v52/**
       - DECISIONS.md
@@ -109,6 +113,10 @@ on:
     paths:
       - .github/scripts/alfa-source-audit.mjs
       - scripts/test/alfa-source-transport-audit.test.mjs
+      - deploy/alfa_release.py
+      - deploy/school_release.py
+      - deploy/school_release_remote.py
+      - deploy/school_inventory.py
       - deploy/v44/src/**
       - deploy/v52/**
       - DECISIONS.md
