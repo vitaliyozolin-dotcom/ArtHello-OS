@@ -155,7 +155,7 @@ REPOSITORY = 'vitaliyozolin-dotcom/ArtHello-OS'
 OWNER = 'vitaliyozolin-dotcom'
 PINS = {
     'central': ('a3a755e893027c67156fabc9774bf327d1aa62dc', None),
-    'atlas': ('41c5f68a96ec5762ba1db79ab3333b29f4c2d2da', '939f5a599a30a490a10bdc1c649a3443c090324a'),
+    'atlas': ('939f5a599a30a490a10bdc1c649a3443c090324a', 'dce9813506dff4b1f8ceca743f72d7af61d5855a'),
     'school': ('6afc12bb9e98b070f1b50e7cb111551e0618c81d', '404d9b8db843ee9d1fcaaff7c1d157ac5ef00a22'),
 }
 
