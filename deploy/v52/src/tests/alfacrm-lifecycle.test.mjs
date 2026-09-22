@@ -363,12 +363,14 @@ for (const branchId of ['BR-SCHOOL','BR-ATLAS-SCHOOL']) test(`diary sender previ
   harness.env.SCHOOL_PUBLIC_ORIGIN='https://school.test';harness.env.CENTRAL_ACCESS_SECRET='s'.repeat(40);
   harness.env.ATLAS_PUBLIC_ORIGIN='https://atlas.test';harness.env.ATLAS_CENTRAL_ACCESS_SECRET='a'.repeat(40);
   sql.prepare('UPDATE education_groups SET unit_entity_id=? WHERE id=?').run(branchId,'G1');
+  sql.prepare("INSERT INTO entities(id,entity_type,display_name,status,metadata) VALUES('STAFF1','Сотрудник','Branch teacher','Активна',?)").run(JSON.stringify({localBranchId:branchId}));
   const calls=[]; let wrongReceipt=false;
   globalThis.fetch=async(url,init)=>{
     assert.equal(url,`${branchId==='BR-SCHOOL'?'https://school.test':'https://atlas.test'}/api/internal/directory-sync`);assert.equal(init.redirect,'manual');
     const payload=JSON.parse(init.body);calls.push(payload);
     assert.equal(payload.branchId,branchId);assert.equal(payload.systemId,branchId==='BR-SCHOOL'?'SYS-SCHOOL-1-11':'SYS-SCHOOL-ATLAS');
     assert.equal(payload.snapshot.students[0].id,'C1');assert.equal(payload.access,undefined);
+    assert.deepEqual(payload.snapshot.teachers,[{id:'STAFF1',displayName:'Branch teacher'}]);
     const key=await crypto.subtle.importKey('raw',new TextEncoder().encode(branchId==='BR-SCHOOL'?harness.env.CENTRAL_ACCESS_SECRET:harness.env.ATLAS_CENTRAL_ACCESS_SECRET),{name:'HMAC',hash:'SHA-256'},false,['verify']);
     assert.equal(await crypto.subtle.verify('HMAC',key,Buffer.from(init.headers['x-arthello-signature'],'hex'),new TextEncoder().encode(`${init.headers['x-arthello-timestamp']}.${init.body}`)),true);
     const digest=Buffer.from(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(JSON.stringify(payload.snapshot)))).toString('hex');
@@ -388,7 +390,7 @@ for (const branchId of ['BR-SCHOOL','BR-ATLAS-SCHOOL']) test(`diary sender previ
   wrongReceipt=false;
   for(let i=0;i<2;i++)assert.equal((await post({action:'applyDiaryDirectory',branchId,token:preview.token})).status,200);
   assert.equal(calls.length,4);
-  assert.equal(sql.prepare('SELECT count(*) n FROM entities').get().n,2);
+  assert.equal(sql.prepare('SELECT count(*) n FROM entities').get().n,3);
 });
 
 test('completed family snapshot archives only departed pupils in the selected branch', async t => {

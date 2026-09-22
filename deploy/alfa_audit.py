@@ -101,7 +101,15 @@ def main():
         '--env','ARTHELLO_OWNER_LOGIN','--env','ARTHELLO_OWNER_PASSWORD',
         '--mount','type=bind,src='+str(ROOT/'deploy')+',dst=/audit,readonly',
         '--entrypoint','node',container['Image'],'/audit/alfa_reconciliation_audit.mjs'],'ALFA_OS_AUDIT=',timeout=900)
-    report['schoolRuntime']=school_inventory()
+    report['atlasData']=capture(['docker','exec','-i','atlas-school-diary','node','--input-type=module','-'],'DIARY_DATA_AUDIT=',data=(ROOT/'deploy/diary-data-audit.mjs').read_bytes())
+    with school_connection() as (execute,inventory):
+        report['schoolRuntime']=inventory
+        container_id=inventory.get('applicationContainerId','')
+        require(inventory.get('status')=='verified' and re.fullmatch(r'[a-f0-9]{64}',container_id),'SCHOOL_INVENTORY')
+        output=execute('docker exec -i '+container_id+' node --input-type=module -',data=(ROOT/'deploy/diary-data-audit.mjs').read_bytes())
+        lines=[line[len('DIARY_DATA_AUDIT='):] for line in output.decode().splitlines() if line.startswith('DIARY_DATA_AUDIT=')]
+        require(len(lines)==1,'SCHOOL_DATA_AUDIT')
+        report['schoolData']=json.loads(lines[0])
     directory=Path.home()/'.config/arthello/release-state'/('d195-audit-'+os.environ['GITHUB_RUN_ID'])
     directory.mkdir(mode=0o700,exist_ok=False)
     (directory/'receipt.json').write_text(json.dumps(report,ensure_ascii=False,indent=2))

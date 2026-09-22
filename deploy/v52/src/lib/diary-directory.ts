@@ -1,7 +1,7 @@
 export type DirectoryClass = { id: string; name: string; grade: number; localId?: string };
 type Group = { id: string; branchId: string; status: string; teacherId: string };
 type Membership = { childId: string; familyId: string; groupId: string; displayName: string };
-type Teacher = { id: string; displayName: string };
+type Teacher = { id: string; displayName: string; metadata?: string };
 const validId = (id: unknown): id is string => typeof id === 'string' && /^[A-Za-z0-9:_-]{1,100}$/.test(id);
 
 export function buildDiaryDirectory(branchId: string, sequence: number, classes: DirectoryClass[], groups: Group[], memberships: Membership[], teachers: Teacher[]) {
@@ -21,7 +21,16 @@ export function buildDiaryDirectory(branchId: string, sequence: number, classes:
     students.set(row.childId,{id:row.childId,firstName:row.displayName,lastName:'',classId:row.groupId,familyId:row.familyId});families.add(row.familyId);
   }
   const teacherIds=new Set(groups.filter(g=>seen.has(g.id)).map(g=>g.teacherId).filter(Boolean));
-  const selectedTeachers=teachers.filter(t=>teacherIds.has(t.id));
+  const selectedTeachers=teachers.filter(t=>{
+    let meta: Record<string, unknown> = {};
+    try { meta=JSON.parse(t.metadata || '{}'); } catch { return false; }
+    if(!meta || typeof meta!=='object' || Array.isArray(meta)) return false;
+    // A current canonical employee may have an archived assignment in this school.
+    // Explicit branch evidence takes precedence over a stale group teacher slot.
+    if(Array.isArray(meta.branchAssignments)) return meta.branchAssignments.some(b=>b && b.localBranchId===branchId && b.active===true);
+    if(typeof meta.localBranchId==='string' && meta.localBranchId) return meta.localBranchId===branchId;
+    return teacherIds.has(t.id);
+  });
   if(selectedTeachers.some(t=>!validId(t.id) || !t.displayName.trim()) || new Set(selectedTeachers.map(t=>t.id)).size!==selectedTeachers.length) throw new Error('Не подтверждены идентификаторы педагогов');
-  return {version:1,sequence,complete:true,classes:classes.map(row=>({...row})),students:[...students.values()],families:[...families].sort().map(id=>({id})),teachers:selectedTeachers.map(row=>({...row}))};
+  return {version:1,sequence,complete:true,classes:classes.map(row=>({...row})),students:[...students.values()],families:[...families].sort().map(id=>({id})),teachers:selectedTeachers.map(({id,displayName})=>({id,displayName}))};
 }
