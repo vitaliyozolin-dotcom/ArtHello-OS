@@ -37,9 +37,11 @@ export async function synchronize(client, progress = () => {}) {
     report.before = summarizePreview({customerPreview:before});
     for (const module of ['families','staff','groups']) {
       const params = {module, ...(module === 'families' ? {deferMissingStatusBranch:'2'} : {})};
+      progress({stage:'module-preview', module});
       const preview = await call({action:'previewModule', ...params});
       requireValue(typeof preview.previewToken === 'string' && preview.count > 0, 'MODULE_PREVIEW');
       if (module === 'families') requireValue(preview.count === before.includedAssignments && preview.deferredCount === 1, 'FAMILY_PREVIEW_DRIFT');
+      progress({stage:'module-import', module});
       const applied = await call({action:'importModule', ...params, previewToken:preview.previewToken});
       requireValue(applied.complete === true && applied.rejected === 0 && applied.accepted === preview.count && applied.state?.modules?.[module]?.status === 'imported', 'MODULE_IMPORT_UNCONFIRMED');
       if (module === 'families') requireValue(applied.deferredCount === 1, 'DEFERRED_RECORD_UNCONFIRMED');

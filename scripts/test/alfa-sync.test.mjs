@@ -50,3 +50,18 @@ test('existing School classes are explicitly preserved; ambiguous grades fail cl
   input.groups.push({id:'duplicate',name:'1-Б класс 2026-2027'});
   assert.throws(()=>classMappings('BR-SCHOOL',input),/CLASS_AMBIGUOUS/);
 });
+
+test('failed staff preview reports exact stage and never begins staff import',async()=>{
+  const client=fixture((body)=>{if(body.action==='previewModule'&&body.module==='staff')throw Error('HTTP_502');});
+  const progress=[];
+  await assert.rejects(()=>synchronize(client,p=>progress.push(p)),/HTTP_502/);
+  assert.deepEqual(progress.at(-1),{stage:'module-preview',module:'staff'});
+  assert.equal(client.calls.some(c=>c.action==='importModule'&&c.module==='staff'),false);
+});
+
+test('audit HTTP errors retain their status even if gateway returned HTML',async(t)=>{
+  const {AuditClient}=await import('../../deploy/alfa_reconciliation_audit.mjs');
+  const client=new AuditClient('test','synthetic-password-only');
+  t.mock.method(globalThis,'fetch',async()=>new Response('<html>gateway</html>',{status:502}));
+  await assert.rejects(()=>client.json('POST','https://arthello-188-225-38-55.sslip.io','/api/integrations/alfacrm',{}),/HTTP_502/);
+});
