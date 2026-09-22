@@ -165,8 +165,8 @@ export default function LoginPage() {
         </div>
 
         {parentOtpEnabled && familyMethod === "code" && !challenge ? (
-          <form className="auth-form" onSubmit={requestCode}>
-            <label className="auth-field" htmlFor="login-identifier">
+          <form className={`auth-form ${styles.form}`} onSubmit={requestCode}>
+            <label className={`auth-field ${styles.field}`} htmlFor="login-identifier">
               <span>Телефон или email</span>
               <input
                 id="login-identifier"
@@ -191,7 +191,7 @@ export default function LoginPage() {
             </div>
 
             <button
-              className="primary-btn auth-submit"
+              className={`primary-btn auth-submit ${styles.submit}`}
               type="submit"
               disabled={busy}
               aria-busy={busy}
@@ -210,13 +210,13 @@ export default function LoginPage() {
         ) : null}
 
         {parentOtpEnabled && familyMethod === "code" && challenge ? (
-          <form className="auth-form" onSubmit={verifyCode}>
+          <form className={`auth-form ${styles.form}`} onSubmit={verifyCode}>
             <div className={styles.codeSummary} role="status">
               <strong>Код отправлен</strong>
               <span>{challenge.maskedTarget}</span>
               <small>Код действует 10 минут и подходит только для одного входа.</small>
             </div>
-            <label className="auth-field" htmlFor="login-code">
+            <label className={`auth-field ${styles.field}`} htmlFor="login-code">
               <span>Код из сообщения</span>
               <input
                 id="login-code"
@@ -243,7 +243,7 @@ export default function LoginPage() {
             </div>
 
             <button
-              className="primary-btn auth-submit"
+              className={`primary-btn auth-submit ${styles.submit}`}
               type="submit"
               disabled={busy}
               aria-busy={busy}
@@ -262,7 +262,7 @@ export default function LoginPage() {
         ) : null}
 
         {familyMethod === "password" ? (
-          <form className="auth-form" onSubmit={loginWithPassword}>
+          <form className={`auth-form ${styles.form}`} onSubmit={loginWithPassword}>
             <div className={styles.codeSummary} role="note">
               <strong>Вход для семьи и ученика</strong>
               <small>
@@ -270,7 +270,7 @@ export default function LoginPage() {
                 через рабочую систему школы.
               </small>
             </div>
-            <label className="auth-field" htmlFor="legacy-identifier">
+            <label className={`auth-field ${styles.field}`} htmlFor="legacy-identifier">
               <span>Телефон или email</span>
               <input
                 id="legacy-identifier"
@@ -283,7 +283,7 @@ export default function LoginPage() {
                 required
               />
             </label>
-            <label className="auth-field" htmlFor="legacy-password">
+            <label className={`auth-field ${styles.field}`} htmlFor="legacy-password">
               <span>Пароль, выданный школой</span>
               <input
                 id="legacy-password"
@@ -306,7 +306,7 @@ export default function LoginPage() {
             </div>
 
             <button
-              className="primary-btn auth-submit"
+              className={`primary-btn auth-submit ${styles.submit}`}
               type="submit"
               disabled={busy}
               aria-busy={busy}
