@@ -18,7 +18,7 @@ function fixture(change=()=>{}) {
       if(body.action==='previewModule') result={previewToken:`token-${body.module}`,count:body.module==='families'?839:10,deferredCount:body.module==='families'?1:0};
       if(body.action==='importModule') result={complete:true,accepted:body.module==='families'?839:10,rejected:0,deferredCount:body.module==='families'?1:0,state:{modules:{[body.module]:{status:'imported'}}}};
       if(body.action==='readDiaryDirectoryOptions') result={diaryOptions:options(body.branchId)};
-      if(['previewDiaryDirectory','applyDiaryDirectory'].includes(body.action)) result={diaryDirectory:{token:'diary-token',applied:body.action==='applyDiaryDirectory',students:30,families:30,classes:body.branchId==='BR-SCHOOL'?6:4,teachers:4,archived:0}};
+      if(['previewDiaryDirectory','applyDiaryDirectory'].includes(body.action)) result={diaryDirectory:{token:'diary-token',applied:body.action==='applyDiaryDirectory',students:30,families:30,classes:body.branchId==='BR-SCHOOL'?6:4,teachers:4,scheduleLessons:body.branchId==='BR-SCHOOL'?184:0,unassignedLessons:body.branchId==='BR-SCHOOL'?20:0,archived:0}};
       change(body,result);return result;
     }};
 }
