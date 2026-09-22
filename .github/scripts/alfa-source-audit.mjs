@@ -98,10 +98,13 @@ async function main() {
         const lessons=[];
         for(const status of [1,2,3]) lessons.push(...await paged(`${id}/lesson/index`,{...period,status}));
         const regular=await paged(`${id}/regular-lesson/index`,period);
+        const subjects=await paged(`${id}/subject/index`);
+        const academicNames=new Set(['русский','русский язык','математика','английский','английский язык','литература','чтение','литературное чтение','окружающий мир','биология','география','история','физкультура','физическая культура','информатика','информатика+it','технология','изо','музыка']);
+        const academicIds=new Set(subjects.filter(s=>academicNames.has(String(s.name??'').trim().toLowerCase())).map(s=>String(s.id)));
         const classIds=new Set(groups.filter(g=>/^(\d{1,2})(?:[-‑–][а-яa-z]+)?\s+класс(?:\s|$)/iu.test(String(g.name??''))).map(g=>String(g.id)));
         const classLessons=lessons.filter(l=>Array.isArray(l.group_ids)&&l.group_ids.some(g=>classIds.has(String(g))));
         teaching={period,lessons:lessons.length,byStatus:Object.fromEntries([1,2,3].map(status=>[status,lessons.filter(l=>Number(l.status)===status).length])),
-          schoolClassLessons:classLessons.length,schoolClassLessonsWithTeachers:classLessons.filter(l=>Array.isArray(l.teacher_ids)&&l.teacher_ids.length>0).length,
+          schoolClassLessons:classLessons.length,schoolClassAcademicLessons:classLessons.filter(l=>academicIds.has(String(l.subject_id))).length,schoolClassSubjectIds:[...new Set(classLessons.map(l=>String(l.subject_id)).filter(id=>/^[1-9]\d*$/.test(id)))].sort(),schoolClassLessonsWithTeachers:classLessons.filter(l=>Array.isArray(l.teacher_ids)&&l.teacher_ids.length>0).length,
           regularLessons:regular.length,schoolClassRegular:regular.filter(l=>l.related_class==='Group'&&classIds.has(String(l.related_id))).length};
       } catch(error) { teaching={period,status:'blocked',reason:/^[A-Z_0-9]{3,70}$/.test(error?.message??'')?error.message:'UNCONFIRMED'}; }
     }
