@@ -7,8 +7,11 @@ export async function summarizeTransportProbe(response) {
   if(response.ok) { await response.body?.cancel(); return {status:response.status,ok:true}; }
   let code;
   try { const text=await response.text(); if(text.length<=16_384) code=JSON.parse(text)?.error; } catch {}
-  const allowed=['upstream_response_too_large','upstream_unavailable','upstream_timeout','invalid_request',
-    'request_not_allowed','json_required','request_too_large','invalid_request_body','invalid_request_headers','token_state_invalid'];
+  // Transport drops all upstream headers except content-type, so this marker
+  // cannot originate in a forwarded AlfaCRM error body.
+  const marker=response.headers.get('x-arthello-upstream-error');
+  const allowed=marker==='unavailable' && response.status===502 ? ['upstream_response_too_large','upstream_unavailable']
+    : marker==='timeout' && response.status===504 ? ['upstream_timeout'] : [];
   return {status:response.status,ok:false,reason:allowed.includes(code)?code:'unclassified'};
 }
 
