@@ -55,7 +55,7 @@ export async function audit(client) {
   }
 }
 
-class AuditClient extends AtlasOwnerAccessHttpClient {
+export class AuditClient extends AtlasOwnerAccessHttpClient {
   async request(urlInput,options={}) {
     const url=this.checkedUrl(urlInput),headers=new Headers(options.headers??{});
     const cookie=this.jar.header(url); if(cookie) headers.set('cookie',cookie);

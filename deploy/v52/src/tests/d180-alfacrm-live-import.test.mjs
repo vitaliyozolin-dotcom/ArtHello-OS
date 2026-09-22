@@ -121,8 +121,8 @@ test("D180 production screens use the paged entity list, automatic importer and 
   assert.doesNotMatch(entitiesRoute, /orderBy\([^;]+\)\.limit\(500\)/);
   assert.match(familyWorkspace, /review","needs_review/);
   assert.match(familyWorkspace, /Показать ещё/);
-  const validation = alfaRoute.indexOf("const projectionRows = currentProjectionRows(module, rows)");
-  const rawPersistence = alfaRoute.indexOf("upsertRawRecords(module, rows, batchId)");
+  const validation = alfaRoute.indexOf("const projectionRows = currentProjectionRows(module, rows, deferredCustomer?.key)");
+  const rawPersistence = alfaRoute.indexOf("upsertRawRecords(module, rows, batchId, deferredCustomer?.key)");
   const staffProjection = alfaRoute.indexOf("canonicalizeStaff(projectionRows", rawPersistence);
   const staffReconciliation = alfaRoute.indexOf("reconcileCurrentSnapshot(module, selectedBranches, projectionRows", staffProjection);
   assert.ok(validation > 0 && rawPersistence > validation && staffProjection > rawPersistence && staffReconciliation > staffProjection,

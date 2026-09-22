@@ -44,6 +44,8 @@ type RemoteBranch = { id: string; name: string };
 type LocalBranch = { id: string; name: string };
 type LegacyDraft = { remoteBranchId: string; localBranchId: string; startDate: string; dataScopes: string[] };
 type ModuleState = {
+  previewDeferredCustomer?: { key: string; hash: string };
+  deferredCustomer?: { key: string; hash: string };
   scopeContract?: string;
   customerPolicyContract?: string;
   status: "not_started" | "previewed" | "importing" | "imported" | "error";
@@ -503,10 +505,12 @@ async function previewModule(context: ImportContext, body: Record<string, unknow
   if (!selectedBranches.length) return privateJson({ error: "Сначала сопоставьте филиалы" }, 409);
   await assertMappedBranchAccess(context, state);
   const params = moduleParams(module, body);
+  assertDeferralOwner(context, params.deferMissingStatusBranch);
   const session = await storedSession(state);
   let count = 0;
   let countUnit = "записей";
   let customerSignature = "";
+  let previewDeferredCustomer: ModuleState['deferredCustomer'];
   if (module === "subscriptions") {
     const customers = await readImportedCustomers(selectedBranches);
     count = customers.length;
@@ -514,7 +518,8 @@ async function previewModule(context: ImportContext, body: Record<string, unknow
     countUnit = "клиентов к проверке";
   } else {
     const rows = await fetchModuleRecords(session, module, selectedBranches, params);
-    count = currentProjectionRows(module, rows).length;
+    previewDeferredCustomer = await missingStatusDeferral(rows, params.deferMissingStatusBranch);
+    count = currentProjectionRows(module, rows, previewDeferredCustomer?.key).length;
   }
   const previewToken = crypto.randomUUID();
   const previewSignature = await previewSignatureFor(module, state, params);
@@ -529,6 +534,7 @@ async function previewModule(context: ImportContext, body: Record<string, unknow
     dateTo: params.dateTo,
     cursor: 0,
     customerSignature,
+    previewDeferredCustomer,
     note: module === "subscriptions"
       ? "Текущие денежные остатки читаются заново из карточек импортированных клиентов. Количество занятий и баланс абонемента не считаются деньгами. Отсутствующий денежный остаток не заменяется нулём."
       : module === "finance"
@@ -551,6 +557,7 @@ async function previewModule(context: ImportContext, body: Record<string, unknow
     module,
     count,
     countUnit,
+    deferredCount: previewDeferredCustomer ? 1 : 0,
     previewToken,
     message: `Предпросмотр готов: ${count} ${countUnit}. В ArtHello OS пока ничего не изменено.${module === "subscriptions" ? " Остатки будут проверены при импорте; отсутствующие и нечисловые значения не заменяются нулём." : ""}`,
   });
@@ -565,6 +572,7 @@ async function importModule(context: ImportContext, body: Record<string, unknown
   if (!selectedBranches.length) return privateJson({ error: "Сначала сопоставьте филиалы" }, 409);
   await assertMappedBranchAccess(context, state);
   const params = moduleParams(module, body);
+  assertDeferralOwner(context, params.deferMissingStatusBranch);
   if (!(await legacyMigrationEvidence(state)).complete) return privateJson({ error: "Обнаружен прежний формат AlfaCRM без истории наблюдений. Сначала требуется проверенный перенос источников; существующие записи сохранены." }, 409);
   const storedModule = state.modules[module];
   const previewToken = clean(body.previewToken, 80);
@@ -622,7 +630,10 @@ async function importModule(context: ImportContext, body: Record<string, unknown
     rows = await fetchModuleRecords(session, module, selectedBranches, params);
   }
 
-  const projectionRows = currentProjectionRows(module, rows);
+  const deferredCustomer = await missingStatusDeferral(rows, params.deferMissingStatusBranch);
+  if (JSON.stringify(deferredCustomer) !== JSON.stringify(storedModule.previewDeferredCustomer))
+    throw new AlfaApiError('Исключённая запись изменилась после предпросмотра. Повторите проверку.', 409);
+  const projectionRows = currentProjectionRows(module, rows, deferredCustomer?.key);
   if (module === 'families') for (const row of projectionRows) familyLocalBranch(state, row.remoteBranchId, row.item);
   // Remember identities already published before this snapshot creates new branch copies.
   const existingIdentityIds = module === "families" || module === "staff"
@@ -630,7 +641,7 @@ async function importModule(context: ImportContext, body: Record<string, unknown
   const batchId = crypto.randomUUID();
   await env.DB.prepare("INSERT INTO alfacrm_import_batches (id,module,scope,status,created_at) VALUES (?,?,?,'projecting',?)")
     .bind(batchId, module, JSON.stringify({ endpoint: state.endpoint, selectedBranches, params }), new Date().toISOString()).run();
-  const rawCount = await upsertRawRecords(module, rows, batchId);
+  const rawCount = await upsertRawRecords(module, rows, batchId, deferredCustomer?.key);
   // Keep every immutable upstream observation, including the evidence that a
   // teacher is inactive or ended. Lifecycle filtering only shapes the current
   // ArtHello projection and the set used to reconcile departed employees.
@@ -648,11 +659,11 @@ async function importModule(context: ImportContext, body: Record<string, unknown
   // Only a fully fetched and fully accepted snapshot proves that missing records departed.
   // Raw observations stay immutable; only the selected current projection is reconciled.
   if (complete && rejected === 0 && ["families", "staff", "groups"].includes(module)) {
-    await reconcileCurrentSnapshot(module, selectedBranches, projectionRows, state);
+    await reconcileCurrentSnapshot(module, selectedBranches, projectionRows, state, deferredCustomer?.key);
   }
   if (complete && rejected === 0 && (module === "families" || module === "staff")) await confirmSharedAlfaIdentities(projectionRows, module, state, context.actor, batchId, existingIdentityIds);
   await refreshIdentityProjections(env.DB);
-  if ((module === "groups" || module === "families") && rejected === 0) await syncMembershipsFromFamilyRaw(state, context.actor);
+  if ((module === "groups" || module === "families") && rejected === 0) await syncMembershipsFromFamilyRaw(state, context.actor, module === 'families' ? deferredCustomer?.key ?? '' : state.modules.families.deferredCustomer?.key ?? '');
   await refreshIdentityProjections(env.DB);
   await env.DB.prepare("UPDATE alfacrm_import_batches SET status=? WHERE id=?")
     .bind(projectionBlocked ? "blocked" : rejected ? "partial" : "complete", batchId).run();
@@ -662,6 +673,7 @@ async function importModule(context: ImportContext, body: Record<string, unknown
     : accepted;
   const moduleState: ModuleState = {
     ...storedModule,
+    deferredCustomer: module === 'families' ? deferredCustomer : storedModule.deferredCustomer,
     scopeContract: complete && rejected === 0 && !projectionBlocked ? ALFA_SCOPE_CONTRACT : storedModule.scopeContract,
     customerPolicyContract: module === 'families' && complete && rejected === 0 ? CUSTOMER_POLICY_CONTRACT : storedModule.customerPolicyContract,
     status: rejected || projectionBlocked ? "error" : complete ? "imported" : "importing",
@@ -673,7 +685,7 @@ async function importModule(context: ImportContext, body: Record<string, unknown
     dateFrom: params.dateFrom,
     dateTo: params.dateTo,
     note: projectionBlocked ? FINANCE_DIRECTION_UNVERIFIED_MESSAGE : rejected ? `Пропущено записей: ${rejected}.${invalidBalanceCount ? ` Остаток отсутствует или не является корректным числом: ${invalidBalanceCount}; прежние подтверждённые остатки сохранены.` : ""} Выбывшие карточки не архивировались; исправьте данные и повторите предпросмотр.` : complete
-      ? moduleCompletionNote(module)
+      ? moduleCompletionNote(module) + (deferredCustomer ? ' Одна запись без статуса исключена по решению собственника; её карточки и связи сохранены.' : '')
       : `Загружено пакетами: обработано клиентов ${nextCursor}. Следующий пакет запускается автоматически.`,
   };
   const next = { ...state, modules: { ...state.modules, [module]: moduleState } };
@@ -690,6 +702,7 @@ async function importModule(context: ImportContext, body: Record<string, unknown
       rawStored: rawCount,
       accepted,
       rejected,
+      deferredCustomer,
       invalidBalanceCount,
       projectionBlocked,
       complete: complete && !projectionBlocked,
@@ -703,6 +716,7 @@ async function importModule(context: ImportContext, body: Record<string, unknown
     state: publicState(next),
     module,
     fetched: rows.length,
+    deferredCount: deferredCustomer ? 1 : 0,
     accepted,
     rejected,
     invalidBalanceCount,
@@ -812,11 +826,27 @@ async function fetchModuleRecords(session: AlfaSession, module: ModuleKey, branc
   return rows;
 }
 
-function currentProjectionRows(module: ModuleKey, rows: FetchedRecord[]) {
+function assertDeferralOwner(context: ImportContext, branch: string | undefined) {
+  if (branch && ('scheduler' in context || !canonicalOwner(context)))
+    throw new AlfaApiError('Исключение записи подтверждает только собственник', 403);
+}
+
+async function missingStatusDeferral(rows: FetchedRecord[], branch?: string): Promise<ModuleState['deferredCustomer']> {
+  if (!branch) return undefined;
+  const scoped = scopedAlfaRows('families', rows);
+  const unknown = scoped.filter(row => customerPolicy(row.statusName).lifecycle === 'review');
+  if (unknown.length !== 1 || unknown[0].remoteBranchId !== branch || scalar(unknown[0].item.study_status_id))
+    throw new AlfaApiError('Исключить можно ровно одну запись без статуса в выбранном филиале. Требуется новая сверка.', 409);
+  const row = unknown[0];
+  return { key: `${row.remoteBranchId}:${scalar(row.item.id)}`, hash: await hashText(JSON.stringify(row)) };
+}
+
+function currentProjectionRows(module: ModuleKey, rows: FetchedRecord[], deferredKey?: string) {
   let scoped: FetchedRecord[];
   try { scoped = scopedAlfaRows(module, rows); }
   catch { throw new AlfaApiError("AlfaCRM не подтвердила филиал или состояние записи. Загрузка остановлена; существующие карточки сохранены.", 409); }
   if (module !== 'families') return scoped;
+  scoped = scoped.filter(row => `${row.remoteBranchId}:${scalar(row.item.id)}` !== deferredKey);
   if (scoped.some(row => customerPolicy(row.statusName).lifecycle === 'review')) {
     throw new AlfaApiError('Есть клиенты с неподтверждённым статусом AlfaCRM. Выполните проверку клиентов и исправьте статус в источнике; существующие карточки сохранены.', 409);
   }
@@ -1144,7 +1174,7 @@ async function ensureAlfaTables() {
   ]);
 }
 
-async function upsertRawRecords(module: ModuleKey, rows: FetchedRecord[], batchId = crypto.randomUUID()) {
+async function upsertRawRecords(module: ModuleKey, rows: FetchedRecord[], batchId = crypto.randomUUID(), deferredKey?: string) {
   const now = new Date().toISOString();
   await env.DB.prepare("INSERT OR IGNORE INTO alfacrm_import_batches (id,module,scope,status,created_at) VALUES (?,?,?,'projecting',?)")
     .bind(batchId, module, JSON.stringify({ branches: [...new Set(rows.map((row) => row.remoteBranchId))] }), now).run();
@@ -1157,7 +1187,7 @@ async function upsertRawRecords(module: ModuleKey, rows: FetchedRecord[], batchI
     statements.push(env.DB.prepare(`INSERT INTO alfacrm_raw_observations
       (id,batch_id,remote_branch_id,module,record_id,payload,payload_hash,observed_at) VALUES (?,?,?,?,?,?,?,?)`)
       .bind(observationId, batchId, row.remoteBranchId, module, id, payload, payloadHash, now));
-    statements.push(env.DB.prepare(`INSERT INTO alfacrm_current_records (remote_branch_id,module,record_id,observation_id,active)
+    if (`${row.remoteBranchId}:${id}` !== deferredKey) statements.push(env.DB.prepare(`INSERT INTO alfacrm_current_records (remote_branch_id,module,record_id,observation_id,active)
       VALUES (?,?,?,?,1) ON CONFLICT(remote_branch_id,module,record_id) DO UPDATE SET observation_id=excluded.observation_id,active=1`)
       .bind(row.remoteBranchId, module, id, observationId));
   }
@@ -1165,8 +1195,9 @@ async function upsertRawRecords(module: ModuleKey, rows: FetchedRecord[], batchI
   return rows.length;
 }
 
-async function reconcileCurrentSnapshot(module: ModuleKey, branchIds: string[], rows: FetchedRecord[], state: AlfaState) {
+async function reconcileCurrentSnapshot(module: ModuleKey, branchIds: string[], rows: FetchedRecord[], state: AlfaState, deferredKey?: string) {
   const seen = new Set(rows.map(({ remoteBranchId, item }) => `${remoteBranchId}:${scalar(item.id)}`));
+  if (deferredKey) seen.add(deferredKey);
   const current = await env.DB.prepare("SELECT remote_branch_id,record_id FROM alfacrm_current_records WHERE module=? AND active=1")
     .bind(module).all<{ remote_branch_id: string; record_id: string }>();
   const selected = new Set(branchIds);
@@ -1397,14 +1428,15 @@ async function canonicalizeGroups(rows: FetchedRecord[], state: AlfaState, local
   return { accepted, rejected };
 }
 
-async function syncMembershipsFromFamilyRaw(state: AlfaState, actor: string) {
+async function syncMembershipsFromFamilyRaw(state: AlfaState, actor: string, deferredKey = state.modules.families.deferredCustomer?.key ?? '') {
   const identities = await readIdentityIndex(env.DB);
-  const existing = await env.DB.prepare("SELECT s.id,g.unit_entity_id AS branch FROM education_students s JOIN education_groups g ON g.id=s.group_id WHERE s.id LIKE 'STU-A-%'")
-    .all<{ id: string; branch: string }>();
+  const deferredChild = deferredKey ? identities.canonical(`CHD-A-${await shortHash(deferredKey)}`) : '';
+  const existing = await env.DB.prepare("SELECT s.id,s.child_entity_id,g.unit_entity_id AS branch FROM education_students s JOIN education_groups g ON g.id=s.group_id WHERE s.id LIKE 'STU-A-%'")
+    .all<{ id: string; child_entity_id: string; branch: string }>();
   const selected = new Set(Object.values(state.branchMappings));
   const archive = [];
   for (const row of existing.results ?? []) {
-    if (selected.has(row.branch)) archive.push(env.DB.prepare("UPDATE education_students SET status='Архив' WHERE id=?").bind(row.id));
+    if (selected.has(row.branch) && identities.canonical(row.child_entity_id) !== deferredChild) archive.push(env.DB.prepare("UPDATE education_students SET status='Архив' WHERE id=?").bind(row.id));
   }
   await runBatches(archive);
   const rows = await env.DB.prepare("SELECT c.remote_branch_id,c.record_id,o.payload FROM alfacrm_current_records c JOIN alfacrm_raw_observations o ON o.id=c.observation_id WHERE c.module='families' AND c.active=1 ORDER BY c.remote_branch_id,c.record_id")
@@ -1412,6 +1444,7 @@ async function syncMembershipsFromFamilyRaw(state: AlfaState, actor: string) {
   const statements = [];
   for (const row of rows.results ?? []) {
     if (!state.branchMappings[row.remote_branch_id]) continue;
+    if (`${row.remote_branch_id}:${row.record_id}` === deferredKey) continue;
     let item: JsonRecord;
     try { item = JSON.parse(row.payload) as JsonRecord; } catch { continue; }
     if (alfaBranchDisposition('families', { remoteBranchId: row.remote_branch_id, item }) !== 'accepted') continue;
@@ -1537,10 +1570,11 @@ async function familyEntityMap(state: AlfaState) {
 }
 
 async function readImportedCustomers(remoteBranches: string[]) {
+  const deferredKey = (await readState()).modules.families.deferredCustomer?.key;
   const rows = await env.DB.prepare("SELECT remote_branch_id,record_id FROM alfacrm_current_records WHERE module='families' AND active=1 ORDER BY remote_branch_id,record_id")
     .all<{ remote_branch_id: string; record_id: string }>();
   const selected = new Set(remoteBranches);
-  return (rows.results ?? []).flatMap((row: { remote_branch_id: string; record_id: string }) => selected.has(row.remote_branch_id)
+  return (rows.results ?? []).flatMap((row: { remote_branch_id: string; record_id: string }) => selected.has(row.remote_branch_id) && `${row.remote_branch_id}:${row.record_id}` !== deferredKey
     ? [{ remoteBranchId: row.remote_branch_id, customerId: row.record_id }]
     : []);
 }
@@ -1691,6 +1725,9 @@ function dependencyError(module: ModuleKey, state: AlfaState) {
 }
 
 function moduleParams(module: ModuleKey, body: Record<string, unknown>) {
+  const deferMissingStatusBranch = body.deferMissingStatusBranch;
+  if (deferMissingStatusBranch !== undefined && (module !== 'families' || typeof deferMissingStatusBranch !== 'string' || !/^[1-9]\d*$/.test(deferMissingStatusBranch)))
+    throw new AlfaApiError('Недопустимое исключение клиента', 400);
   const today = new Date().toISOString().slice(0, 10);
   let dateFrom = "";
   let dateTo = "";
@@ -1706,7 +1743,7 @@ function moduleParams(module: ModuleKey, body: Record<string, unknown>) {
     if (!isoDate(dateFrom) || dateFrom > today) throw new Error("Укажите корректную дату перехода для оплат");
     if (daysBetween(dateFrom, dateTo) > 730) throw new Error("Для первичного финансового импорта выберите дату перехода не старше двух лет");
   }
-  return { dateFrom, dateTo };
+  return { dateFrom, dateTo, ...(typeof deferMissingStatusBranch === 'string' ? { deferMissingStatusBranch } : {}) };
 }
 
 async function previewSignatureFor(module: ModuleKey, state: AlfaState, params: { dateFrom: string; dateTo: string }) {
