@@ -5,7 +5,33 @@ const ORIGIN = 'https://arthello-188-225-38-55.sslip.io';
 const PATH = '/api/integrations/alfacrm';
 const count = value => Number.isSafeInteger(value) && value >= 0 ? value : null;
 const pairs = value => Object.entries(value ?? {}).filter(([key, item]) => /^[1-9]\d*$/.test(key) && typeof item === 'string' && /^BR-[A-Z0-9-]+$/.test(item));
-const safeFailure = error => /^HTTP_\d{3}$|^[A-Z_]{3,60}$/.test(error?.message ?? '') ? error.message : 'UNCONFIRMED';
+const safeFailure = error => /^HTTP_\d{3}$|^[A-Z_0-9]{3,60}$/.test(error?.message ?? '') ? error.message : 'UNCONFIRMED';
+
+// Exact application-owned messages only. Never expose upstream bodies or names.
+export function classifyAlfaApiFailure(status, payload) {
+  const message = typeof payload?.error === 'string' ? payload.error : '';
+  const reasons = new Map([
+    ['AlfaCRM не вернула корректный список записей. Изменения не применены.','ALFA_INVALID_LIST'],
+    ['AlfaCRM вернула некорректное количество записей.','ALFA_INVALID_TOTAL'],
+    ['Серверный канал AlfaCRM не настроен. Подключение не изменено.','ALFA_TRANSPORT_NOT_CONFIGURED'],
+    ['AlfaCRM перенаправила запрос. Проверьте адрес аккаунта; данные доступа на другой адрес не отправлялись.','ALFA_REDIRECT'],
+    ['AlfaCRM повторила страницу. Полнота загрузки не подтверждена; изменения не применены.','ALFA_REPEATED_PAGE'],
+    ['AlfaCRM повторила ID на страницах. Полнота загрузки не подтверждена; повторите чтение.','ALFA_REPEATED_ID'],
+    ['Список AlfaCRM изменился во время чтения. Повторите предпросмотр.','ALFA_TOTAL_CHANGED'],
+    ['Количество записей AlfaCRM не совпало с итогом. Повторите чтение.','ALFA_TOTAL_MISMATCH'],
+    ['AlfaCRM вернула неполный список. Изменения не применены.','ALFA_INCOMPLETE_PAGE'],
+    ['Достигнут предел страниц AlfaCRM. Полнота загрузки не подтверждена; сузьте выборку.','ALFA_PAGE_LIMIT'],
+    ['AlfaCRM вернула слишком большой ответ. Сузьте период или набор данных.','ALFA_RESPONSE_TOO_LARGE'],
+    ['AlfaCRM вернула некорректный ответ.','ALFA_INVALID_JSON'],
+    ['Сессия AlfaCRM истекла во время чтения. Повторите действие — ключ в ArtHello OS сохранён.','ALFA_SESSION_EXPIRED'],
+    ['AlfaCRM отклонила e-mail или ключ API. Проверьте доступ v2api в карточке пользователя.','ALFA_AUTH_REJECTED'],
+    ['Сервер ArtHello не смог установить защищённое соединение с AlfaCRM. Подключение не изменено; требуется восстановить связь на сервере.','ALFA_TRANSPORT_UNAVAILABLE'],
+    ['Сервер ArtHello не дождался ответа AlfaCRM. Подключение не изменено; повторите после восстановления связи.','ALFA_TRANSPORT_TIMEOUT'],
+  ]);
+  if(reasons.has(message)) return reasons.get(message);
+  const upstream = /^AlfaCRM (?:не выполнила чтение данных|не подтвердила авторизацию) \(([1-5]\d{2})\)\.$/.exec(message);
+  return upstream ? `ALFA_UPSTREAM_HTTP_${upstream[1]}` : `HTTP_${status}`;
+}
 
 export function summarizePreview(value) {
   const p = value?.customerPreview;
@@ -43,6 +69,7 @@ export async function audit(client) {
     const checks=[
       ['customers',{action:'previewCustomers'},summarizePreview],
       ['legacy',{action:'previewLegacyMigration'},v=>({count:count(v.legacyMigration?.count),complete:v.legacyMigration?.complete===true})],
+      ['staffPreview',{action:'previewModule',module:'staff'},v=>({count:count(v.count)})],
       ...['BR-ATLAS-SCHOOL','BR-SCHOOL'].map(branchId=>[branchId,{action:'readDiaryDirectoryOptions',branchId},v=>({branchId,classes:v.diaryOptions?.classes?.length??null,groups:v.diaryOptions?.groups?.length??null})]),
     ];
     for (const [name,body,summarize] of checks) {
@@ -61,7 +88,11 @@ export class AuditClient extends AtlasOwnerAccessHttpClient {
     const cookie=this.jar.header(url); if(cookie) headers.set('cookie',cookie);
     const response=await fetch(url,{...options,headers,redirect:'manual',signal:AbortSignal.timeout(300_000)});
     this.jar.absorb(url,response.headers);
-    if (response.status >= 400) throw Error(`HTTP_${response.status}`);
+    if (response.status >= 400) {
+      let payload = null;
+      try { const body = await response.text(); if(body.length <= 16_384) payload=JSON.parse(body); } catch {}
+      throw Error(classifyAlfaApiFailure(response.status,payload));
+    }
     return response;
   }
 }

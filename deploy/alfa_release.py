@@ -154,7 +154,7 @@ ROOT = Path(__file__).resolve().parents[1]
 REPOSITORY = 'vitaliyozolin-dotcom/ArtHello-OS'
 OWNER = 'vitaliyozolin-dotcom'
 PINS = {
-    'central': ('d27c691af97767aaef68097d1aabad9f88e2a468', None),
+    'central': ('a3a755e893027c67156fabc9774bf327d1aa62dc', None),
     'atlas': ('fdd8316ce50962476dbfee446181ca6c9d71fcc8', '41c5f68a96ec5762ba1db79ab3333b29f4c2d2da'),
     'school': ('e9a2a92edbd150dfeaa4b566a206e6bbb00169ad', '0cb894eda21c6a446b804e51c8cac8c54af9b5cd'),
 }
