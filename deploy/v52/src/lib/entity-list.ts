@@ -37,6 +37,7 @@ export function listEntities(rows: EntityListRow[], options: EntityListOptions) 
   });
   const displayRows = sourceRows.map((row) => ({
     ...row,
+    hasNameCollision: row.status !== "Архив" && row.status !== "Объединена" && (duplicateKeys.get(entityDuplicateKey(row)) ?? 0) > 1,
     dataQuality: entityDataState(row, (duplicateKeys.get(entityDuplicateKey(row)) ?? 0) > 1),
   }));
   const query = options.q.trim().toLocaleLowerCase("ru-RU");
