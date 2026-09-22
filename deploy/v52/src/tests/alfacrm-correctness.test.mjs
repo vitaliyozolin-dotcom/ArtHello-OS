@@ -949,6 +949,7 @@ test('real family read follows old ID and returns both children, contracts and o
  };
  harness.orm=drizzle(harness.env.DB);
  const familyAdapters={...mergeAdapters,
+  '../../../lib/family-card-state':dataModule(stripTypeScriptTypes(readFileSync(resolve('lib/family-card-state.ts'),'utf8'),{mode:'strip'})),
   '../../../db':dataModule('export const ensureCoreTables=async()=>{};export const getDb=()=>globalThis.__alfaCorrectness.orm;'),
   '../../../db/schema':new URL('../db/schema.ts',import.meta.url).href,
   '../../../lib/request-user':dataModule('export const getRequestUser=()=>globalThis.__alfaCorrectness.actor?.actor;'),
