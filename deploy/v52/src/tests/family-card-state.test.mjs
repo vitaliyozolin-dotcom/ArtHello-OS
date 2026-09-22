@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { familyCardState } from '../lib/family-card-state.ts';
+import { familyCardState, editableFamilyExtras, isSourceOwnedFamilyField } from '../lib/family-card-state.ts';
 
 const family = (meta = {}, extra = {}) => ({status:'Активна',sourceSystem:'ALFACRM',dataQuality:'На проверке',metadata:JSON.stringify(meta),...extra});
 test('source statuses stay literal and separate from card state', () => {
@@ -43,4 +43,17 @@ test('review is not shown as complete merely because a field was edited', () => 
   assert.ok(state.issues.some(x=>x.code==='import-review'));
   assert.equal(familyCardState(family({}, {sourceSystem:'MANUAL',dataQuality:'Проверено'})).issues.length,0);
   assert.equal(familyCardState(family({alfaStatusName:'Активен'}, {status:'Архив'})).cardStatus,'Архив');
+});
+
+test('any real linked representative prevents a false missing-parent task', () => {
+  const f=family({alfaStatusName:'Активен'});
+  for (const parentNames of [['Представитель семьи','Тестовый Родитель'],['Тестовый Родитель','Представитель семьи']]) {
+    assert.ok(!familyCardState(f,{parentNames}).issues.some(x=>x.code==='parent-missing'));
+  }
+});
+
+test('generic family edits cannot inject source statuses or identity evidence', () => {
+  const edits={alfaStatusName:'Активен',alfaStatusId:'1',alfaCustomerId:'2',customerLifecycle:'active',attendanceFormat:'single',branchAssignments:'[]',canonicalId:'OTHER',guardianName:'Invented',discountCode:'TEST'};
+  assert.deepEqual(editableFamilyExtras(edits),{discountCode:'TEST'});
+  for(const key of Object.keys(edits).filter(key=>key!=='discountCode')) assert.equal(isSourceOwnedFamilyField(key),true);
 });
