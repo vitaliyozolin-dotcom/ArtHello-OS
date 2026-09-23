@@ -35,6 +35,7 @@ export async function GET(request: Request) {
       quality,
       status: url.searchParams.get("status") === "archive" ? "archive" : url.searchParams.get("status") === "all" ? "all" : "current",
       review,
+      branch: type === "Семья" ? url.searchParams.get("branch")?.trim().slice(0, 120) || "" : "",
       mode,
       offset,
       limit,

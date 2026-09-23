@@ -4,10 +4,13 @@ export const developerFeedbackSchema = [
   "CREATE UNIQUE INDEX IF NOT EXISTS `developer_feedback_author_submission` ON `developer_feedback` (`author_user_id`,`submission_id`)",
   "CREATE INDEX IF NOT EXISTS `developer_feedback_author_id` ON `developer_feedback` (`author_user_id`,`id`)",
   "CREATE TABLE IF NOT EXISTS `developer_feedback_events` (\n\t`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,\n\t`feedback_id` integer NOT NULL,\n\t`revision` integer NOT NULL,\n\t`actor_user_id` text NOT NULL,\n\t`status` text NOT NULL,\n\t`created_at` text NOT NULL,\n\tFOREIGN KEY (`feedback_id`) REFERENCES `developer_feedback`(`id`) ON UPDATE no action ON DELETE restrict,\n\tFOREIGN KEY (`actor_user_id`) REFERENCES `app_users`(`id`) ON UPDATE no action ON DELETE restrict,\n\tCONSTRAINT \"developer_feedback_event_status\" CHECK(\"developer_feedback_events\".\"status\" IN ('new','reviewing','planned','done','declined'))\n)",
-  "CREATE UNIQUE INDEX IF NOT EXISTS `developer_feedback_event_revision` ON `developer_feedback_events` (`feedback_id`,`revision`)"
+  "CREATE UNIQUE INDEX IF NOT EXISTS `developer_feedback_event_revision` ON `developer_feedback_events` (`feedback_id`,`revision`)",
+  "CREATE TABLE IF NOT EXISTS `developer_feedback_images` (`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL, `feedback_id` integer NOT NULL, `position` integer NOT NULL, `filename` text NOT NULL, `mime_type` text NOT NULL, `image_base64` text NOT NULL, FOREIGN KEY (`feedback_id`) REFERENCES `developer_feedback`(`id`) ON UPDATE no action ON DELETE restrict)",
+  "CREATE UNIQUE INDEX IF NOT EXISTS `developer_feedback_image_position` ON `developer_feedback_images` (`feedback_id`,`position`)"
 ] as const;
 
 export const developerFeedbackColumns = {
   developer_feedback: ['id','submission_id','author_user_id','author_name','kind','title','body','module_id','status','revision','created_at','updated_at'],
   developer_feedback_events: ['id','feedback_id','revision','actor_user_id','status','created_at'],
+  developer_feedback_images: ['id','feedback_id','position','filename','mime_type','image_base64'],
 } as const;

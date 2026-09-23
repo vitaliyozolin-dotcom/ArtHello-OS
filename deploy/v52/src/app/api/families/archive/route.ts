@@ -32,7 +32,7 @@ export async function POST(request: Request) {
     const familyIds = identities.members(family.id);
     const familyCards = identities.cards.filter(card => familyIds.includes(card.id));
     // Non-owner permissions come from current server grants, not a client branch name.
-    if (!owner) {
+    if (!owner && !user.isAdministrative) {
       const grants = (await env.DB.prepare(`SELECT b.name FROM user_branch_access a JOIN organization_branches b ON b.id=a.branch_id
         WHERE a.user_id=? AND b.status='Активен'`).bind(context.appUserId).all<{name:string}>()).results;
       if (familyCards.some(card => !grants.some(grant => grant.name === card.scope))) return reply({ error: 'Нужны права на все филиалы семьи' }, 403);

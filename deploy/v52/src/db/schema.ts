@@ -910,3 +910,11 @@ export const developerFeedbackEvents = sqliteTable("developer_feedback_events", 
   uniqueIndex("developer_feedback_event_revision").on(table.feedbackId, table.revision),
   feedbackCheck("developer_feedback_event_status", sql`${table.status} IN ('new','reviewing','planned','done','declined')`),
 ]);
+export const developerFeedbackImages = sqliteTable("developer_feedback_images", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  feedbackId: integer("feedback_id").notNull().references(() => developerFeedback.id, { onDelete: "restrict" }),
+  position: integer("position").notNull(),
+  filename: text("filename").notNull(),
+  mimeType: text("mime_type").notNull(),
+  imageBase64: text("image_base64").notNull(),
+}, (table) => [uniqueIndex("developer_feedback_image_position").on(table.feedbackId, table.position)]);
