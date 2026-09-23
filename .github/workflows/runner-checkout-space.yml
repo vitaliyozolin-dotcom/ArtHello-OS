@@ -59,24 +59,28 @@ jobs:
           candidates=()
           bytes=0
           skipped=0
+          skipped_path=0
+          skipped_root=0
+          skipped_origin=0
+          skipped_status=0
           for path in "$checkout"/preflight-*; do
             name="${path##*/}"
             [[ "$name" =~ ^preflight-([0-9]+)-1$ ]] || continue
             test "${BASH_REMATCH[1]}" -lt "$GITHUB_RUN_ID" || continue
             if [ ! -d "$path" ] || [ -L "$path" ] || [ "$(realpath -e "$path")" != "$path" ] ||
                [ ! -d "$path/.git" ] || [ -L "$path/.git" ]; then
-              skipped="$((skipped + 1))"; continue
+              skipped="$((skipped + 1))"; skipped_path="$((skipped_path + 1))"; continue
             fi
             if [ "$(git -C "$path" rev-parse --show-toplevel 2>/dev/null || true)" != "$path" ]; then
-              skipped="$((skipped + 1))"; continue
+              skipped="$((skipped + 1))"; skipped_root="$((skipped_root + 1))"; continue
             fi
             origin="$(git -C "$path" remote get-url origin 2>/dev/null || true)"
             case "$origin" in
               https://github.com/vitaliyozolin-dotcom/ArtHello-OS|https://github.com/vitaliyozolin-dotcom/ArtHello-OS.git) ;;
-              *) skipped="$((skipped + 1))"; continue ;;
+              *) skipped="$((skipped + 1))"; skipped_origin="$((skipped_origin + 1))"; continue ;;
             esac
             if ! status="$(git -C "$path" status --porcelain 2>/dev/null)" || [ -n "$status" ]; then
-              skipped="$((skipped + 1))"; continue
+              skipped="$((skipped + 1))"; skipped_status="$((skipped_status + 1))"; continue
             fi
             size="$(du -x -B1 -s "$path" | cut -f1)"
             bytes="$((bytes + size))"
@@ -85,6 +89,7 @@ jobs:
           echo "PREFLIGHT_CHECKOUT_COUNT=${#candidates[@]}"
           echo "PREFLIGHT_CHECKOUT_BYTES=$bytes"
           echo "PREFLIGHT_CHECKOUT_SKIPPED=$skipped"
+          echo "PREFLIGHT_SKIP_PATH=$skipped_path ROOT=$skipped_root ORIGIN=$skipped_origin STATUS=$skipped_status"
           if [ "$OPERATION" = inspect ]; then
             echo 'RUNNER_CHECKOUT_INSPECTED=1'
             exit 0
