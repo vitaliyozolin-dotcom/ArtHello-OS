@@ -2,6 +2,12 @@ name: Check ArtHello server browser prerequisites
 
 on:
   workflow_dispatch:
+    inputs:
+      cleanup_stale_checkouts:
+        description: 'Remove only aged runner checkouts from completed gateway runs'
+        required: false
+        type: boolean
+        default: false
   workflow_run:
     workflows: [Quality gates]
     types: [completed]
@@ -246,6 +252,58 @@ jobs:
             fi
           done | sort -nr | sed -n '1,100p'
           echo 'ARTHELLO_GATEWAY_STORAGE_INVENTORY=READ_ONLY'
+
+      - name: Reclaim aged ephemeral gateway checkouts
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.cleanup_stale_checkouts == true }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          current_main="$(curl --fail --silent --show-error --max-time 20 \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H 'Accept: application/vnd.github+json' \
+            https://api.github.com/repos/vitaliyozolin-dotcom/ArtHello-OS/git/ref/heads/main | jq -er '.object.sha')"
+          test "$current_main" = "$CHECKED_SOURCE_SHA"
+          test "$(hostname -I | tr ' ' '\\n' | grep -Fx '188.225.38.55' | head -n1)" = 188.225.38.55
+          runner_root="$(realpath "$RUNNER_TEMP/../..")"
+          test "$runner_root" = /opt/actions-runner-arthello-gateway
+          workspace="$(realpath "$GITHUB_WORKSPACE")"
+          test "$workspace" = "$runner_root/_work/ArtHello-OS/ArtHello-OS"
+          test -d "$workspace/.git"
+          test "$GITHUB_RUN_ID" -gt 0
+          echo '### Before cleanup (KiB)'
+          df -Pk -- "$workspace"
+          deleted=0
+          bytes=0
+          while IFS= read -r -d '' candidate; do
+            name="${candidate##*/}"
+            if [[ ! "$name" =~ ^(preflight|alfa-release|alfa-audit|alfa-sync)-([1-9][0-9]*)-([1-9][0-9]*)$ ]]; then
+              continue
+            fi
+            run_id="${BASH_REMATCH[2]}"
+            test "$run_id" -lt "$GITHUB_RUN_ID" || continue
+            test "$candidate" != "$workspace/preflight-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+            test ! -L "$candidate"
+            test "$(realpath "$candidate")" = "$workspace/$name"
+            while IFS= read -r mount_target; do
+              case "$mount_target" in
+                "$candidate"|"$candidate"/*)
+                  echo "BLOCKED: mounted directory under $name"
+                  exit 2
+                  ;;
+              esac
+            done < <(findmnt -rn -o TARGET)
+            size="$(du -sx -B1 -- "$candidate" | cut -f1)"
+            echo "Removing expired runner checkout $name ($size bytes)"
+            find "$candidate" -xdev -depth -delete
+            deleted=$((deleted + 1))
+            bytes=$((bytes + size))
+          done < <(find "$workspace" -mindepth 1 -maxdepth 1 -type d -mmin +120 -print0)
+          echo "ARTHELLO_STALE_CHECKOUTS_REMOVED=$deleted"
+          echo "ARTHELLO_STALE_CHECKOUT_BYTES=$bytes"
+          echo '### After cleanup (KiB)'
+          df -Pk -- "$workspace"
 
       - name: Diagnose rejected R9 route without changing gateway
         working-directory: preflight-${{ github.run_id }}-${{ github.run_attempt }}
