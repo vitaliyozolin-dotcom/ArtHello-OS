@@ -90,7 +90,7 @@ test("employee identity owns contact, multi-branch affiliation and contract navi
   assert.match(settingsApi, /employeeBranchIds/);
   assert.match(settings, /input readOnly value=\{user\.contact\}/);
   assert.match(settings, /type="hidden" name="contact"/);
-  assert.match(settings, /можно сузить доступ/);
+  assert.match(settings, /Владелец может назначить любой действующий филиал/);
 });
 
 test("family card is a clickable cross-domain relationship graph", async () => {

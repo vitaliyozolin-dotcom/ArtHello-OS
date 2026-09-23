@@ -4,6 +4,7 @@ import { ensureCoreTables, getDb } from "../../../db";
 import { auditEvents, entities, entityDocuments, entityLinks, entityMerges } from "../../../db/schema";
 import { moduleUsage } from "../../../lib/registry";
 import { getRequestUser } from "../../../lib/request-user";
+import { getAuthenticatedRequestContext, isCanonicalOwnerContext } from "../../../lib/production-auth";
 
 export async function GET(request: Request) {
   const actor = getRequestUser(request);
@@ -28,10 +29,11 @@ export async function GET(request: Request) {
     const peers = peerIds.length ? await db.select().from(entities).where(inArray(entities.id, peerIds)) : [];
     const peerMap = new Map(peers.map((peer) => [peer.id, peer]));
     const documents = await db.select().from(entityDocuments).where(inArray(entityDocuments.entityId, mergedIds)).orderBy(desc(entityDocuments.createdAt), desc(entityDocuments.id));
-    const history = await db.select().from(auditEvents).where(and(
+    const context = await getAuthenticatedRequestContext(request);
+    const history = context && isCanonicalOwnerContext(context) ? await db.select().from(auditEvents).where(and(
       eq(auditEvents.entityType, "entity"),
       inArray(auditEvents.entityId, mergedIds),
-    )).orderBy(desc(auditEvents.createdAt), desc(auditEvents.id)).limit(100);
+    )).orderBy(desc(auditEvents.createdAt), desc(auditEvents.id)).limit(100) : [];
     const duplicateCandidates = await db.select().from(entities).where(eq(entities.entityType, entity.entityType));
     const relationCandidates = await db.select().from(entities);
 

@@ -45,10 +45,10 @@ export function listEntities(rows: EntityListRow[], options: EntityListOptions) 
   const matchingRows = displayRows.filter((row) => {
     if (row.status === "Объединена" && !query) return false;
     if (options.type && row.entityType !== options.type) return false;
+    const status = options.status ?? "current";
+    if (status === "current" && row.status === "Архив") return false;
+    if (status === "archive" && row.status !== "Архив") return false;
     if (options.type === "Семья") {
-      const status = options.status ?? "current";
-      if (status === "current" && row.status === "Архив") return false;
-      if (status === "archive" && row.status !== "Архив") return false;
       if (options.branch && !familyScopes(row).includes(options.branch)) return false;
     }
     if (!query) return true;

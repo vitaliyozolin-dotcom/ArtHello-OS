@@ -733,10 +733,12 @@ async function loadEmployeeAccessDirectory(accountUsers: Array<typeof appUsers.$
   const accountById = new Map(accountUsers.map((user) => [user.id, user]));
   const accountByContact = new Map(accountUsers.map((user) => [normalizeLooseContact(user.contact), user]));
   const usedAccounts = new Set<string>();
-  const directory = employees.map((employee) => {
+  const directory = employees.filter((employee) => employee.status === "Работает" && !["Архив", "Объединена"].includes(entityMap.get(employee.id)?.status ?? "")).map((employee) => {
     const entity = entityMap.get(employee.id);
     const metadata = parseMetadata(entity?.metadata ?? "{}");
-    const contact = clean(metadata.contact, 160);
+    const contact = [metadata.contact, metadata.phone, metadata.email]
+      .map((value) => clean(value, 160))
+      .find((value) => validContact(value, value.includes("@") ? "email" : "phone")) ?? "";
     const savedBranchIds = stringArray(metadata.branchIds);
     const legacyBranchIds = employee.unit.split(",").map(matchLegacyBranch).filter((id): id is string => Boolean(id));
     const employeeBranchIds = savedBranchIds.length ? savedBranchIds : legacyBranchIds;

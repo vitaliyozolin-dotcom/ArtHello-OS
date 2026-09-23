@@ -23,7 +23,7 @@ type EntityRecord = {
   updatedAt: string;
 };
 
-type RegistryStats = { total: number; needsReview: number; duplicateGroups: number; sources: number };
+type RegistryStats = { total: number; archived: number; needsReview: number; duplicateGroups: number; sources: number };
 type EntityRelation = { id: number; relationType: string; direction: string; peer: EntityRecord | null; createdAt: string };
 type EntityDocument = { id: number; title: string; documentType: string; status: string; validUntil: string; source: string; createdAt: string };
 type AuditEvent = { id: number; action: string; actor: string; payload: string; createdAt: string };
@@ -45,12 +45,13 @@ const dataStateOptions = [...ENTITY_DATA_STATES];
 
 export function RegistryWorkspace({ notify, capabilities }: { notify: (value: string) => void; capabilities: RegistryCapabilities }) {
   const [entities, setEntities] = useState<EntityRecord[]>([]);
-  const [stats, setStats] = useState<RegistryStats>({ total: 0, needsReview: 0, duplicateGroups: 0, sources: 0 });
+  const [stats, setStats] = useState<RegistryStats>({ total: 0, archived: 0, needsReview: 0, duplicateGroups: 0, sources: 0 });
   const [typeCounts, setTypeCounts] = useState<Record<string, number>>({});
   const [state, setState] = useState<"loading" | "ready" | "error">("loading");
   const [query, setQuery] = useState("");
   const [type, setType] = useState("");
   const [quality, setQuality] = useState("");
+  const [recordStatus, setRecordStatus] = useState<"current" | "archive" | "all">("current");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [action, setAction] = useState<RegistryAction | null>(null);
 
@@ -61,6 +62,7 @@ export function RegistryWorkspace({ notify, capabilities }: { notify: (value: st
       if (query.trim()) params.set("q", query.trim());
       if (type) params.set("type", type);
       if (quality) params.set("quality", quality);
+      params.set("status", recordStatus);
       const response = await fetch(`/api/entities?${params}`, { cache: "no-store" });
       if (!response.ok) throw new Error();
       const payload = (await response.json()) as { entities: EntityRecord[]; stats: RegistryStats; typeCounts: Record<string, number> };
@@ -71,7 +73,7 @@ export function RegistryWorkspace({ notify, capabilities }: { notify: (value: st
     } catch {
       setState("error");
     }
-  }, [query, type, quality]);
+  }, [query, type, quality, recordStatus]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => void loadEntities(), 220);
@@ -98,7 +100,7 @@ export function RegistryWorkspace({ notify, capabilities }: { notify: (value: st
     />
 
     <div className="ahRegistryKpis">
-      <KpiCard label="Активные карточки" value={String(stats.total)} note="единый центральный реестр" />
+      <KpiCard label="Текущие карточки" value={String(stats.total)} note={`${stats.archived} в архиве`} />
       <KpiCard className={stats.needsReview ? "ahRegistryKpiWarning" : undefined} label="Нужна сверка" value={String(stats.needsReview)} note="только импорт, интеграция или конфликт" />
       <KpiCard className={stats.duplicateGroups ? "ahRegistryKpiDanger" : undefined} label="Группы дублей" value={String(stats.duplicateGroups)} note="без удаления истории" />
       <KpiCard label="Источники" value={String(stats.sources)} note="ручной ввод · импорт · интеграции" />
@@ -109,7 +111,8 @@ export function RegistryWorkspace({ notify, capabilities }: { notify: (value: st
         <SearchField className="ahRegistrySearch" value={query} onChange={setQuery} placeholder="Найти по номеру, названию, источнику или области" label="Поиск по единому реестру" />
         <select value={type} onChange={(event) => setType(event.target.value)} aria-label="Фильтр по типу"><option value="">Все типы</option>{entityTypes.map((item) => <option key={item}>{item}</option>)}</select>
         <select value={quality} onChange={(event) => setQuality(event.target.value)} aria-label="Фильтр по состоянию данных"><option value="">Все состояния данных</option>{dataStateOptions.map((item) => <option key={item}>{item}</option>)}</select>
-        {(query || type || quality) ? <Button variant="ghost" className="ahRegistryClear" onClick={() => { setQuery(""); setType(""); setQuality(""); }}>Сбросить</Button> : null}
+        <select value={recordStatus} onChange={(event) => setRecordStatus(event.target.value as "current" | "archive" | "all")} aria-label="Фильтр по архиву"><option value="current">Текущие</option><option value="archive">Архив</option><option value="all">Все записи</option></select>
+        {(query || type || quality || recordStatus !== "current") ? <Button variant="ghost" className="ahRegistryClear" onClick={() => { setQuery(""); setType(""); setQuality(""); setRecordStatus("current"); }}>Сбросить</Button> : null}
       </div>
       <div className="ahRegistryTabs"><Tabs items={registryTabs} value={type} onChange={setType} ariaLabel="Типы карточек" /></div>
 
