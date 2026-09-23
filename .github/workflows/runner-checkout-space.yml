@@ -58,22 +58,33 @@ jobs:
           shopt -s nullglob
           candidates=()
           bytes=0
+          skipped=0
           for path in "$checkout"/preflight-*; do
             name="${path##*/}"
             [[ "$name" =~ ^preflight-([0-9]+)-1$ ]] || continue
             test "${BASH_REMATCH[1]}" -lt "$GITHUB_RUN_ID" || continue
-            test -d "$path" && test ! -L "$path"
-            test "$(realpath -e "$path")" = "$path"
-            test -d "$path/.git" && test ! -L "$path/.git"
-            test "$(git -C "$path" rev-parse --show-toplevel)" = "$path"
-            test "$(git -C "$path" remote get-url origin)" = 'https://github.com/vitaliyozolin-dotcom/ArtHello-OS.git'
-            if [ -n "$(git -C "$path" status --porcelain)" ]; then continue; fi
+            if [ ! -d "$path" ] || [ -L "$path" ] || [ "$(realpath -e "$path")" != "$path" ] ||
+               [ ! -d "$path/.git" ] || [ -L "$path/.git" ]; then
+              skipped="$((skipped + 1))"; continue
+            fi
+            if [ "$(git -C "$path" rev-parse --show-toplevel 2>/dev/null || true)" != "$path" ]; then
+              skipped="$((skipped + 1))"; continue
+            fi
+            origin="$(git -C "$path" remote get-url origin 2>/dev/null || true)"
+            case "$origin" in
+              https://github.com/vitaliyozolin-dotcom/ArtHello-OS|https://github.com/vitaliyozolin-dotcom/ArtHello-OS.git) ;;
+              *) skipped="$((skipped + 1))"; continue ;;
+            esac
+            if ! status="$(git -C "$path" status --porcelain 2>/dev/null)" || [ -n "$status" ]; then
+              skipped="$((skipped + 1))"; continue
+            fi
             size="$(du -x -B1 -s "$path" | cut -f1)"
             bytes="$((bytes + size))"
             candidates+=("$path")
           done
           echo "PREFLIGHT_CHECKOUT_COUNT=${#candidates[@]}"
           echo "PREFLIGHT_CHECKOUT_BYTES=$bytes"
+          echo "PREFLIGHT_CHECKOUT_SKIPPED=$skipped"
           if [ "$OPERATION" = inspect ]; then
             echo 'RUNNER_CHECKOUT_INSPECTED=1'
             exit 0
