@@ -1,0 +1,76 @@
+name: Guarded runner checkout space
+
+on:
+  workflow_dispatch:
+    inputs:
+      operation:
+        description: Inspect, or remove only the reproducible cached Git checkout
+        type: choice
+        required: true
+        options: [inspect, clean]
+      confirmation:
+        description: For clean type CLEAN ARTHELLO RUNNER GIT CACHE
+        type: string
+        required: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: gateway-38-55-arthello-production
+  cancel-in-progress: false
+
+jobs:
+  checkout-space:
+    if: >-
+      github.repository == 'vitaliyozolin-dotcom/ArtHello-OS' &&
+      github.ref == 'refs/heads/main' &&
+      github.actor == 'vitaliyozolin-dotcom' &&
+      github.triggering_actor == 'vitaliyozolin-dotcom' &&
+      github.run_attempt == 1 &&
+      (inputs.operation == 'inspect' ||
+       (inputs.operation == 'clean' && inputs.confirmation == 'CLEAN ARTHELLO RUNNER GIT CACHE'))
+    runs-on: [self-hosted, linux, x64, arthello-gateway]
+    environment: production-ru
+    timeout-minutes: 10
+    steps:
+      - name: Inspect and optionally remove only the Git checkout cache
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          OPERATION: ${{ inputs.operation }}
+        run: |
+          set -Eeuo pipefail
+          current_main="$(curl --fail --silent --show-error --max-time 20 \
+            -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/vnd.github+json' \
+            https://api.github.com/repos/vitaliyozolin-dotcom/ArtHello-OS/git/ref/heads/main | jq -er '.object.sha')"
+          test "$current_main" = "$GITHUB_SHA"
+          runner_root="$(realpath "$RUNNER_TEMP/../..")"
+          checkout="$runner_root/_work/ArtHello-OS/ArtHello-OS"
+          test "$GITHUB_WORKSPACE" = "$checkout"
+          test "$(realpath -e "$checkout")" = "$checkout"
+          test -d "$checkout/.git" && test ! -L "$checkout/.git"
+          test "$(realpath -e "$checkout/.git")" = "$checkout/.git"
+          echo '### Space before (KiB)'
+          df -Pk -- "$checkout"
+          echo '### Reproducible checkout paths (bytes)'
+          du -x -B1 -d1 "$checkout" | sort -nr | sed -n '1,20p'
+          if [ "$OPERATION" = inspect ]; then
+            echo 'RUNNER_CHECKOUT_INSPECTED=1'
+            exit 0
+          fi
+          test "$OPERATION" = clean
+          test "$(git -C "$checkout" remote get-url origin)" = 'https://github.com/vitaliyozolin-dotcom/ArtHello-OS.git'
+          test -z "$(git -C "$checkout" status --porcelain)"
+          docker ps -aq --no-trunc | xargs -r docker inspect | jq -e --arg path "$checkout" \
+            '[.[] | .Mounts[]? | .Source | select(. == $path or startswith($path + "/"))] | length == 0' >/dev/null
+          cache_bytes="$(du -x -B1 -s "$checkout/.git" | cut -f1)"
+          test "$cache_bytes" -ge 1073741824
+          cd "$RUNNER_TEMP"
+          rm -rf -- "$checkout/.git"
+          test ! -e "$checkout/.git"
+          echo '### Space after (KiB)'
+          df -Pk -- "$checkout"
+          available="$(df -Pk -- "$checkout" | awk 'NR==2 {print $4}')"
+          test "$available" -ge 5242880
+          echo 'RUNNER_GIT_CACHE_REMOVED=1'
