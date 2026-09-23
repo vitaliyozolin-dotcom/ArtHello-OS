@@ -204,8 +204,9 @@ jobs:
       - name: Inventory gateway storage for D158 without mutation
         working-directory: preflight-${{ github.run_id }}-${{ github.run_attempt }}
         if: >-
-          github.event_name == 'workflow_run' &&
-          startsWith(github.event.workflow_run.head_commit.message, 'D158: inventory ArtHello Pay gateway storage')
+          github.event_name == 'workflow_dispatch' ||
+          (github.event_name == 'workflow_run' &&
+           startsWith(github.event.workflow_run.head_commit.message, 'D158: inventory ArtHello Pay gateway storage'))
         shell: bash
         run: |
           set -Eeuo pipefail
