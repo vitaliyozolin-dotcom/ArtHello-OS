@@ -265,7 +265,7 @@ jobs:
             -H 'Accept: application/vnd.github+json' \
             https://api.github.com/repos/vitaliyozolin-dotcom/ArtHello-OS/git/ref/heads/main | jq -er '.object.sha')"
           test "$current_main" = "$CHECKED_SOURCE_SHA"
-          test "$(hostname -I | tr ' ' '\\n' | grep -Fx '188.225.38.55' | head -n1)" = 188.225.38.55
+          test "$(hostname -I | tr ' ' '\n' | grep -Fx '188.225.38.55' | head -n1)" = 188.225.38.55
           runner_root="$(realpath "$RUNNER_TEMP/../..")"
           test "$runner_root" = /opt/actions-runner-arthello-gateway
           workspace="$(realpath "$GITHUB_WORKSPACE")"
