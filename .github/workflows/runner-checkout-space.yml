@@ -79,7 +79,17 @@ jobs:
               https://github.com/vitaliyozolin-dotcom/ArtHello-OS|https://github.com/vitaliyozolin-dotcom/ArtHello-OS.git) ;;
               *) skipped="$((skipped + 1))"; skipped_origin="$((skipped_origin + 1))"; continue ;;
             esac
-            if ! status="$(git -C "$path" status --porcelain 2>/dev/null)" || [ -n "$status" ]; then
+            if ! status="$(git -C "$path" status --porcelain 2>/dev/null)"; then
+              skipped="$((skipped + 1))"; skipped_status="$((skipped_status + 1))"; continue
+            fi
+            if [ "$status" = '?? .github/scripts/__pycache__/' ]; then
+              cache="$path/.github/scripts/__pycache__"
+              if [ ! -d "$cache" ] || [ -L "$cache" ] ||
+                 [ -n "$(find "$cache" -type l -print -quit)" ] ||
+                 [ -n "$(find "$cache" -type f ! -name '*.pyc' -print -quit)" ]; then
+                skipped="$((skipped + 1))"; skipped_status="$((skipped_status + 1))"; continue
+              fi
+            elif [ -n "$status" ]; then
               if [ "$OPERATION" = inspect ] && [ "$skipped_status" -eq 0 ]; then
                 echo '### First changed checkout status (paths only, no contents)'
                 printf '%s\n' "$status" | sed -n '1,20p'
