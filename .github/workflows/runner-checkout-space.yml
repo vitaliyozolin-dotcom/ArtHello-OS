@@ -4,12 +4,12 @@ on:
   workflow_dispatch:
     inputs:
       operation:
-        description: Inspect, or remove only the reproducible cached Git checkout
+        description: Inspect, or remove only completed preflight checkouts
         type: choice
         required: true
         options: [inspect, clean]
       confirmation:
-        description: For clean type CLEAN ARTHELLO RUNNER GIT CACHE
+        description: For clean type CLEAN ARTHELLO PREFLIGHT CHECKOUTS
         type: string
         required: false
 
@@ -29,12 +29,12 @@ jobs:
       github.triggering_actor == 'vitaliyozolin-dotcom' &&
       github.run_attempt == 1 &&
       (inputs.operation == 'inspect' ||
-       (inputs.operation == 'clean' && inputs.confirmation == 'CLEAN ARTHELLO RUNNER GIT CACHE'))
+       (inputs.operation == 'clean' && inputs.confirmation == 'CLEAN ARTHELLO PREFLIGHT CHECKOUTS'))
     runs-on: [self-hosted, linux, x64, arthello-gateway]
     environment: production-ru
     timeout-minutes: 10
     steps:
-      - name: Inspect and optionally remove only the Git checkout cache
+      - name: Inspect and optionally remove completed preflight checkouts
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -55,22 +55,45 @@ jobs:
           df -Pk -- "$checkout"
           echo '### Reproducible checkout paths (bytes)'
           du -x -B1 -d1 "$checkout" | sort -nr | sed -n '1,20p'
+          shopt -s nullglob
+          candidates=()
+          bytes=0
+          for path in "$checkout"/preflight-*; do
+            name="${path##*/}"
+            [[ "$name" =~ ^preflight-([0-9]+)-1$ ]] || continue
+            test "${BASH_REMATCH[1]}" -lt "$GITHUB_RUN_ID" || continue
+            test -d "$path" && test ! -L "$path"
+            test "$(realpath -e "$path")" = "$path"
+            test -d "$path/.git" && test ! -L "$path/.git"
+            test "$(git -C "$path" rev-parse --show-toplevel)" = "$path"
+            test "$(git -C "$path" remote get-url origin)" = 'https://github.com/vitaliyozolin-dotcom/ArtHello-OS.git'
+            if [ -n "$(git -C "$path" status --porcelain)" ]; then continue; fi
+            size="$(du -x -B1 -s "$path" | cut -f1)"
+            bytes="$((bytes + size))"
+            candidates+=("$path")
+          done
+          echo "PREFLIGHT_CHECKOUT_COUNT=${#candidates[@]}"
+          echo "PREFLIGHT_CHECKOUT_BYTES=$bytes"
           if [ "$OPERATION" = inspect ]; then
             echo 'RUNNER_CHECKOUT_INSPECTED=1'
             exit 0
           fi
           test "$OPERATION" = clean
-          test "$(git -C "$checkout" remote get-url origin)" = 'https://github.com/vitaliyozolin-dotcom/ArtHello-OS.git'
-          test -z "$(git -C "$checkout" status --porcelain)"
-          docker ps -aq --no-trunc | xargs -r docker inspect | jq -e --arg path "$checkout" \
-            '[.[] | .Mounts[]? | .Source | select(. == $path or startswith($path + "/"))] | length == 0' >/dev/null
-          cache_bytes="$(du -x -B1 -s "$checkout/.git" | cut -f1)"
-          test "$cache_bytes" -ge 1073741824
+          test "${#candidates[@]}" -ge 20
+          test "$bytes" -ge 1600000000
+          mapfile -t containers < <(docker ps -aq --no-trunc)
+          if [ "${#containers[@]}" -gt 0 ]; then
+            mounts="$(docker inspect "${containers[@]}" | jq -r '[.[] | .Mounts[]? | .Source] | .[]')"
+            for path in "${candidates[@]}"; do
+              if printf '%s\n' "$mounts" | grep -Fxq "$path"; then exit 2; fi
+              if printf '%s\n' "$mounts" | grep -Fq "$path/"; then exit 2; fi
+            done
+          fi
           cd "$RUNNER_TEMP"
-          rm -rf -- "$checkout/.git"
-          test ! -e "$checkout/.git"
+          for path in "${candidates[@]}"; do rm -rf -- "$path"; done
+          for path in "${candidates[@]}"; do test ! -e "$path"; done
           echo '### Space after (KiB)'
           df -Pk -- "$checkout"
           available="$(df -Pk -- "$checkout" | awk 'NR==2 {print $4}')"
           test "$available" -ge 5242880
-          echo 'RUNNER_GIT_CACHE_REMOVED=1'
+          echo 'RUNNER_PREFLIGHT_CHECKOUTS_REMOVED=1'
