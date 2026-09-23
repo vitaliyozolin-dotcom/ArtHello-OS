@@ -114,7 +114,7 @@ export const API_RULES: readonly ApiRule[] = ([
   { prefix: "/api/entity-merge", read: [], write: withOwner("DIRECTOR", "ADMIN") },
   { prefix: "/api/entities", read: withOwner("DIRECTOR", "ADMIN", "SALES", "HR", "FINANCE", "ACCOUNTING", "LEGAL", "PROCUREMENT"), write: withOwner("DIRECTOR", "ADMIN") },
   { prefix: "/api/workflow-documents", read: withOwner("DIRECTOR", "ADMIN", "HR", "LEGAL", "ACCOUNTING", "FINANCE", "PROCUREMENT"), write: withOwner("DIRECTOR", "ADMIN", "HR", "LEGAL", "ACCOUNTING", "PROCUREMENT") },
-  { prefix: "/api/audit", read: withOwner("DIRECTOR", "ADMIN", "QUALITY", "LEGAL"), write: [] },
+  { prefix: "/api/audit", read: withOwner(), write: [] },
   { prefix: "/api/data-mode", read: withOwner("DIRECTOR", "ANALYTICS", "QUALITY"), write: [] },
   { prefix: "/api/task-actions", read: allRoles, write: allRoles },
   { prefix: "/api/tasks", read: allRoles, write: allRoles },

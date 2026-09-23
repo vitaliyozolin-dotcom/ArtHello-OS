@@ -2,10 +2,13 @@ import { and, desc, eq } from "drizzle-orm";
 import { ensureCoreTables, getDb } from "../../../db";
 import { auditEvents } from "../../../db/schema";
 import { getRequestUser } from "../../../lib/request-user";
+import { getAuthenticatedRequestContext, isCanonicalOwnerContext } from "../../../lib/production-auth";
 
 export async function GET(request: Request) {
   const actor = getRequestUser(request);
   if (!actor) return Response.json({ error: "Требуется вход" }, { status: 401 });
+  const context = await getAuthenticatedRequestContext(request);
+  if (!context || !isCanonicalOwnerContext(context)) return Response.json({ error: "Журнал доступен только владельцу" }, { status: 403 });
 
   const url = new URL(request.url);
   const entityType = url.searchParams.get("entityType")?.trim().slice(0, 80) || "";

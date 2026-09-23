@@ -174,7 +174,8 @@ test("proxy, navigation and displayed role matrix share one typed policy", async
   assert.match(shell, /from "\.\.\/\.\.\/lib\/access-policy"/);
   assert.match(accessWorkspace, /from "\.\.\/\.\.\/lib\/access-policy"/);
   assert.match(accessWorkspace, /permissionForRole\(definition\.apiRole, moduleId\)/);
-  assert.match(settingsApi, /canManageAccess\(requestAccessContext\(request\)\)/);
+  assert.match(settingsApi, /getAuthenticatedRequestContext\(request\)/);
+  assert.match(settingsApi, /isCanonicalOwnerContext\(authenticated\)/);
   assert.doesNotMatch(settingsApi, /canManage:\s*me\.isAdministrative/);
   assert.match(settingsApi, /requireOwner\(canManage\)/);
 });

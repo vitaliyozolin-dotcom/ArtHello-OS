@@ -62,7 +62,8 @@ export async function GET(request: Request) {
     await ensureSystems();
     const me = await ensureUser(actor);
     if (!me || me.status === "Доступ приостановлен") return Response.json({ error: "Доступ ещё не активирован владельцем" }, { status: 403 });
-    const canManage = canManageAccess(requestAccessContext(request));
+    const authenticated = await getAuthenticatedRequestContext(request);
+    const canManage = Boolean(authenticated && isCanonicalOwnerContext(authenticated));
     if (new URL(request.url).searchParams.get("section") === "families") {
       if (!canManage) return Response.json({ error: "Нет прав на каталог семей" }, { status: 403 });
       const familyPage = await loadFamilyDirectoryPage(request);
@@ -1054,13 +1055,6 @@ async function assertSameOriginMutation(request: Request) {
     return Response.json({ error: "Защитная сессия устарела. Войдите заново." }, { status: 403 });
   }
   return authenticated;
-}
-
-function requestAccessContext(request: Request) {
-  return {
-    apiRole: request.headers.get("x-arthello-role") ?? "",
-    isSystemOwner: request.headers.get("x-arthello-system-owner") === "1",
-  };
 }
 
 function requireOwner(value: boolean) { if (!value) throw new Error("Нет прав: изменять доступы и системные настройки может только собственник"); }
