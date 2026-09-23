@@ -733,7 +733,7 @@ async function loadEmployeeAccessDirectory(accountUsers: Array<typeof appUsers.$
   const accountById = new Map(accountUsers.map((user) => [user.id, user]));
   const accountByContact = new Map(accountUsers.map((user) => [normalizeLooseContact(user.contact), user]));
   const usedAccounts = new Set<string>();
-  const directory = employees.filter((employee) => employee.status === "Работает" && !["Архив", "Объединена"].includes(entityMap.get(employee.id)?.status ?? "")).map((employee) => {
+  const directory = employees.filter((employee) => employee.status === "Работает" && !["Архив", "Объединена"].includes(entityMap.get(employee.id)?.status ?? "")).flatMap((employee) => {
     const entity = entityMap.get(employee.id);
     const metadata = parseMetadata(entity?.metadata ?? "{}");
     const contact = [metadata.contact, metadata.phone, metadata.email]
@@ -743,10 +743,15 @@ async function loadEmployeeAccessDirectory(accountUsers: Array<typeof appUsers.$
     const legacyBranchIds = employee.unit.split(",").map(matchLegacyBranch).filter((id): id is string => Boolean(id));
     const employeeBranchIds = savedBranchIds.length ? savedBranchIds : legacyBranchIds;
     const account = accountById.get(employee.id) ?? (contact ? accountByContact.get(normalizeLooseContact(contact)) : undefined);
-    if (account) usedAccounts.add(account.id);
-    if (account) return { ...exposeAccountUser(account), employeeId: employee.id, hasAccess: true, source: entity?.sourceSystem ?? "HR", unit: employee.unit, position: account.jobTitle || employee.positionId, employeeBranchIds, dataQuality: entity?.dataQuality ?? "На проверке" };
+    // Several HR source rows may identify one login. Show that login only once
+    // in access settings; keep every HR/source record intact for reconciliation.
+    if (account) {
+      if (usedAccounts.has(account.id)) return [];
+      usedAccounts.add(account.id);
+      return [{ ...exposeAccountUser(account), employeeId: employee.id, hasAccess: true, source: entity?.sourceSystem ?? "HR", unit: employee.unit, position: account.jobTitle || employee.positionId, employeeBranchIds, dataQuality: entity?.dataQuality ?? "На проверке" }];
+    }
     const role = suggestedRole(employee.positionId);
-    return {
+    return [{
       id: employee.id,
       employeeId: employee.id,
       contactType: contact.includes("@") ? "email" : "phone",
@@ -770,7 +775,7 @@ async function loadEmployeeAccessDirectory(accountUsers: Array<typeof appUsers.$
       position: employee.positionId,
       employeeBranchIds,
       dataQuality: entity?.dataQuality ?? "На проверке",
-    };
+    }];
   });
   const accessOnly = accountUsers.filter((user) => !usedAccounts.has(user.id)).map((user) => ({ ...exposeAccountUser(user), employeeId: "", hasAccess: true, source: "Учётная запись", unit: "", position: user.jobTitle, employeeBranchIds: [] as string[], dataQuality: "Проверено" }));
   return [...directory, ...accessOnly].sort((a, b) => a.displayName.localeCompare(b.displayName, "ru"));
