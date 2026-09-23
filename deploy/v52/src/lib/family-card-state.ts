@@ -10,7 +10,13 @@ export function isSourceOwnedFamilyField(key: string) {
   return /^alfa/i.test(key) || ['customerLifecycle','attendanceFormat','canonicalId','branchAssignments','identitySourceStatus','localArchive','remoteBranchId','localBranchId','sourceLocalBranchId','guardianName'].includes(key);
 }
 export function editableFamilyExtras(values: Record<string, unknown>) {
-  return Object.fromEntries(Object.entries(values).filter(([key]) => !isSourceOwnedFamilyField(key)));
+  // The editor round-trips hidden fields as text; only editable values may override stored metadata.
+  return Object.fromEntries(Object.entries(values).filter(([key]) =>
+    !isSourceOwnedFamilyField(key)
+    && !/^(?:id|sourceSystem|sourceRecordId|dataQuality|metadata|createdAt|updatedAt)$/i.test(key)
+    && !/(?:Id|Ids)$/.test(key)
+    && !/(?:^|[_-])ids?$/i.test(key)
+  ));
 }
 function object(value: unknown): Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
