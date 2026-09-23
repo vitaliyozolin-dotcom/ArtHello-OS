@@ -4,12 +4,12 @@ on:
   workflow_dispatch:
     inputs:
       operation:
-        description: Inspect, or remove only completed preflight checkouts
+        description: Inspect, or remove only completed temporary checkouts
         type: choice
         required: true
         options: [inspect, clean]
       confirmation:
-        description: For clean type CLEAN ARTHELLO PREFLIGHT CHECKOUTS
+        description: For clean type CLEAN ARTHELLO OLD CHECKOUTS
         type: string
         required: false
 
@@ -29,12 +29,12 @@ jobs:
       github.triggering_actor == 'vitaliyozolin-dotcom' &&
       github.run_attempt == 1 &&
       (inputs.operation == 'inspect' ||
-       (inputs.operation == 'clean' && inputs.confirmation == 'CLEAN ARTHELLO PREFLIGHT CHECKOUTS'))
+       (inputs.operation == 'clean' && inputs.confirmation == 'CLEAN ARTHELLO OLD CHECKOUTS'))
     runs-on: [self-hosted, linux, x64, arthello-gateway]
     environment: production-ru
     timeout-minutes: 10
     steps:
-      - name: Inspect and optionally remove completed preflight checkouts
+      - name: Inspect and optionally remove completed temporary checkouts
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -63,10 +63,10 @@ jobs:
           skipped_root=0
           skipped_origin=0
           skipped_status=0
-          for path in "$checkout"/preflight-*; do
+          for path in "$checkout"/preflight-* "$checkout"/alfa-release-*; do
             name="${path##*/}"
-            [[ "$name" =~ ^preflight-([0-9]+)-1$ ]] || continue
-            test "${BASH_REMATCH[1]}" -lt "$GITHUB_RUN_ID" || continue
+            [[ "$name" =~ ^(preflight|alfa-release)-([0-9]+)-1$ ]] || continue
+            test "${BASH_REMATCH[2]}" -lt "$GITHUB_RUN_ID" || continue
             if [ ! -d "$path" ] || [ -L "$path" ] || [ "$(realpath -e "$path")" != "$path" ] ||
                [ ! -d "$path/.git" ] || [ -L "$path/.git" ]; then
               skipped="$((skipped + 1))"; skipped_path="$((skipped_path + 1))"; continue
@@ -100,10 +100,10 @@ jobs:
             bytes="$((bytes + size))"
             candidates+=("$path")
           done
-          echo "PREFLIGHT_CHECKOUT_COUNT=${#candidates[@]}"
-          echo "PREFLIGHT_CHECKOUT_BYTES=$bytes"
-          echo "PREFLIGHT_CHECKOUT_SKIPPED=$skipped"
-          echo "PREFLIGHT_SKIP_PATH=$skipped_path ROOT=$skipped_root ORIGIN=$skipped_origin STATUS=$skipped_status"
+          echo "OLD_CHECKOUT_COUNT=${#candidates[@]}"
+          echo "OLD_CHECKOUT_BYTES=$bytes"
+          echo "OLD_CHECKOUT_SKIPPED=$skipped"
+          echo "OLD_CHECKOUT_SKIP_PATH=$skipped_path ROOT=$skipped_root ORIGIN=$skipped_origin STATUS=$skipped_status"
           if [ "$OPERATION" = inspect ]; then
             echo 'RUNNER_CHECKOUT_INSPECTED=1'
             exit 0
@@ -126,4 +126,4 @@ jobs:
           df -Pk -- "$checkout"
           available="$(df -Pk -- "$checkout" | awk 'NR==2 {print $4}')"
           test "$available" -ge 5242880
-          echo 'RUNNER_PREFLIGHT_CHECKOUTS_REMOVED=1'
+          echo 'RUNNER_OLD_CHECKOUTS_REMOVED=1'
