@@ -87,7 +87,7 @@ export function RegistryWorkspace({ notify, capabilities }: { notify: (value: st
   }
 
   const registryTabs = [
-    { id: "", label: <>Все <b>{stats.total}</b></> },
+    { id: "", label: <>Все <b>{recordStatus === "archive" ? stats.archived : recordStatus === "all" ? stats.total + stats.archived : stats.total}</b></> },
     ...entityTypes.filter((item) => typeCounts[item]).map((item) => ({ id: item, label: <>{item} <b>{typeCounts[item]}</b></> })),
   ];
 
