@@ -394,7 +394,9 @@ def main():
                 and old['Image'] == 'sha256:38b25e525cbcbebff5e581840138f01f5f89dd7aa521eecec0ba5b15fd1bca93', 'PREDECESSOR_INVENTORY')
     plan = runtime_plan(old, system, image, image_source, image_tree)
     if system == 'central':
-        require(old['Id'] == '36a0f675e0145de6ba4399efaab7bbcb27f0cabfc7cdf9d3c1380af2aba5d7c3', 'PREDECESSOR_INVENTORY')
+        require(old['Id'] == '6778606e16c108c74a1ec0ec80516a33f1e46b2bac200c5e2f708dd7d50de629'
+                and old['Image'] == 'sha256:61eb2c281f7f7526ac5be325af33dfbdbe4eea6adb8393c9cdd1dad6e055a7fa',
+                'PREDECESSOR_INVENTORY')
     public_health()
     result = upgrade(old, plan, work, run_key, current_main)
     receipt = {'decision': 'D194', 'state': 'runtime-verified', 'controllerSha': source, 'verificationRuns': runs,
