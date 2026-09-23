@@ -41,17 +41,19 @@ export async function GET(request: Request) {
       limit,
     });
     const { displayRows, duplicateKeys } = listed;
+    const currentRows = displayRows.filter((row) => row.status !== "Объединена" && row.status !== "Архив");
     return Response.json({
       entities: listed.entities,
       total: listed.total,
       resultCounts: listed.resultCounts,
       typeCounts: Object.fromEntries(entityTypes.map((item) => [
         item,
-        displayRows.filter((row) => row.status !== "Объединена" && row.entityType === item).length,
+        displayRows.filter((row) => row.status !== "Объединена" && row.entityType === item && (url.searchParams.get("status") === "archive" ? row.status === "Архив" : url.searchParams.get("status") === "all" || row.status !== "Архив")).length,
       ])),
       stats: {
-        total: displayRows.filter((row) => row.status !== "Объединена").length,
-        needsReview: displayRows.filter((row) => row.status !== "Объединена" && reviewStates.has(row.dataQuality)).length,
+        total: currentRows.length,
+        archived: displayRows.filter((row) => row.status === "Архив").length,
+        needsReview: currentRows.filter((row) => reviewStates.has(row.dataQuality)).length,
         duplicateGroups: [...duplicateKeys.values()].filter((count) => count > 1).length,
         sources: new Set(displayRows.map((row) => row.sourceSystem)).size,
       },

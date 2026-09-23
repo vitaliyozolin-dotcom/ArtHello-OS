@@ -62,7 +62,8 @@ export async function GET(request: Request) {
     await ensureSystems();
     const me = await ensureUser(actor);
     if (!me || me.status === "Доступ приостановлен") return Response.json({ error: "Доступ ещё не активирован владельцем" }, { status: 403 });
-    const canManage = canManageAccess(requestAccessContext(request));
+    const authenticated = await getAuthenticatedRequestContext(request);
+    const canManage = Boolean(authenticated && isCanonicalOwnerContext(authenticated));
     if (new URL(request.url).searchParams.get("section") === "families") {
       if (!canManage) return Response.json({ error: "Нет прав на каталог семей" }, { status: 403 });
       const familyPage = await loadFamilyDirectoryPage(request);
@@ -732,10 +733,12 @@ async function loadEmployeeAccessDirectory(accountUsers: Array<typeof appUsers.$
   const accountById = new Map(accountUsers.map((user) => [user.id, user]));
   const accountByContact = new Map(accountUsers.map((user) => [normalizeLooseContact(user.contact), user]));
   const usedAccounts = new Set<string>();
-  const directory = employees.map((employee) => {
+  const directory = employees.filter((employee) => employee.status === "Работает" && !["Архив", "Объединена"].includes(entityMap.get(employee.id)?.status ?? "")).map((employee) => {
     const entity = entityMap.get(employee.id);
     const metadata = parseMetadata(entity?.metadata ?? "{}");
-    const contact = clean(metadata.contact, 160);
+    const contact = [metadata.contact, metadata.phone, metadata.email]
+      .map((value) => clean(value, 160))
+      .find((value) => validContact(value, value.includes("@") ? "email" : "phone")) ?? "";
     const savedBranchIds = stringArray(metadata.branchIds);
     const legacyBranchIds = employee.unit.split(",").map(matchLegacyBranch).filter((id): id is string => Boolean(id));
     const employeeBranchIds = savedBranchIds.length ? savedBranchIds : legacyBranchIds;
@@ -1054,13 +1057,6 @@ async function assertSameOriginMutation(request: Request) {
     return Response.json({ error: "Защитная сессия устарела. Войдите заново." }, { status: 403 });
   }
   return authenticated;
-}
-
-function requestAccessContext(request: Request) {
-  return {
-    apiRole: request.headers.get("x-arthello-role") ?? "",
-    isSystemOwner: request.headers.get("x-arthello-system-owner") === "1",
-  };
 }
 
 function requireOwner(value: boolean) { if (!value) throw new Error("Нет прав: изменять доступы и системные настройки может только собственник"); }
