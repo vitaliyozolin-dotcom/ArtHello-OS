@@ -238,8 +238,8 @@ jobs:
             system: SYS-SCHOOL-ATLAS
             branch: BR-ATLAS-SCHOOL
           - diary: school
-            source: 5876accedbdf3758971fdc383f1e0fad8c32a158
-            tree: b1c9f99cae0b44a19a15cfe93a2ebb5de74c601b
+            source: 5802a5e6fb6d254f1f67a3776ae0c47d43a68859
+            tree: d15d663d1b823b36f0172cfa128b18714eb88811
             system: SYS-SCHOOL-1-11
             branch: BR-SCHOOL
     env:
@@ -282,7 +282,7 @@ jobs:
         run: |
           set -Eeuo pipefail
           tag="arthello-directory-$DIARY_NAME:$DIARY_SOURCE"
-          docker build --label "org.opencontainers.image.revision=$DIARY_SOURCE" --label "org.opencontainers.image.source-tree=$DIARY_TREE" --tag "$tag" diary
+          docker build --build-arg NEXT_PUBLIC_SCHOOL_DESIGN_V1=true --label "org.opencontainers.image.revision=$DIARY_SOURCE" --label "org.opencontainers.image.source-tree=$DIARY_TREE" --tag "$tag" diary
           container="directory-ci-$DIARY_NAME-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
           cleanup() { docker rm -f "$container" >/dev/null 2>&1 || true; }
           trap cleanup EXIT
@@ -301,6 +301,7 @@ jobs:
             sleep 2
           done
           test "$ready" = 1
+          docker exec "$container" node -e 'fetch("http://127.0.0.1:3000/").then(async response => { const html = await response.text(); if (!response.ok || !html.includes("data-design-code=\"v1\"")) process.exit(1); }).catch(() => process.exit(1))'
           docker exec "$container" node /run/directory-smoke.mjs
           docker exec "$container" node --input-type=module -e "import {DatabaseSync} from 'node:sqlite'; const db=new DatabaseSync('/data/isolated-ci.sqlite',{readOnly:true}); const row=db.prepare(\"SELECT count(*) n FROM students WHERE id='CI-C1' AND status='archived'\").get(); if(row.n!==1) throw Error('pupil projection'); if(db.prepare(\"SELECT count(*) n FROM central_directory_links WHERE kind='student'\").get().n!==1) throw Error('duplicate identity'); if(db.prepare('PRAGMA integrity_check').get().integrity_check!=='ok') throw Error('integrity'); db.close();"
           mkdir -p "$RUNNER_TEMP/directory-bundle"

@@ -67,7 +67,7 @@ def main():
             require(path.is_file() and not path.is_symlink(),'BUNDLE_FILE')
             bundle.add(path,arcname=name,recursive=False)
     with audit.school_connection() as (execute,inventory):
-        require(inventory.get('status')=='verified' and inventory.get('applicationContainerId')=='814d37b2b44a661ed16fc372008e6a7766e73efa2c897eacda08dc3be7e04e74','LIVE_APPLICATION_UNCONFIRMED')
+        require(inventory.get('status')=='verified' and inventory.get('applicationContainerId')=='c9e60f7b109a916aacb65190056c4f4dc4a1f5fd3edc8f0cc87540a50742a689','LIVE_APPLICATION_UNCONFIRMED')
         code=receiver_code(source,run_key,runs['verify-arthello-v52'],release.file_hash(archive),archive.stat().st_size)
         command='python3 -c '+shlex.quote(code)
         with archive.open('rb') as stream:
