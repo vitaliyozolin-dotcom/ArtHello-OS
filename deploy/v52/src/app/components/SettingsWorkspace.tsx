@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import { FormEvent, type RefObject, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { moduleCatalog, type ModuleId } from "../../data/test-snapshot";
 import { API_ROLE_BY_APP_ROLE, APP_ROLE_DEFINITIONS, canAccessModule, permissionForRole } from "../../lib/access-policy";
 import { recordLabel } from "../../lib/record-labels";
@@ -55,6 +55,12 @@ export function SettingsWorkspace({ close, notify, onContextChanged, initialTab 
   const [error, setError] = useState("");
   const [credentialLink, setCredentialLink] = useState("");
   const [accessEmployeeId, setAccessEmployeeId] = useState("");
+  const [accessQuery, setAccessQuery] = useState("");
+  const [accessStatus, setAccessStatus] = useState("all");
+  const [accessBranch, setAccessBranch] = useState("");
+  const [accessRole, setAccessRole] = useState("");
+  const settingsBodyRef = useRef<HTMLDivElement>(null);
+  const accessFormHeadingRef = useRef<HTMLHeadingElement>(null);
   const [temporaryCredential, setTemporaryCredential] = useState<TemporaryCredential | null>(null);
   const [ownerDiaryOpen, setOwnerDiaryOpen] = useState(false);
   const [ownerDiarySystem, setOwnerDiarySystem] = useState("SYS-SCHOOL-1-11");
@@ -123,6 +129,20 @@ export function SettingsWorkspace({ close, notify, onContextChanged, initialTab 
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [close, temporaryCredential]);
+  useEffect(() => {
+    if (tab !== "Доступы" || !accessEmployeeId) return;
+    const frame = window.requestAnimationFrame(() => {
+      settingsBodyRef.current?.scrollTo({ top: 0 });
+      accessFormHeadingRef.current?.focus({ preventScroll: true });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [accessEmployeeId, tab]);
+
+  function openAccessEditor(userId: string) {
+    setOwnerDiaryOpen(false);
+    setAccessEmployeeId(userId);
+    window.requestAnimationFrame(() => settingsBodyRef.current?.scrollTo({ top: 0 }));
+  }
 
   async function action(body: Record<string, unknown>, key: string) {
     setBusy(key);
@@ -207,6 +227,19 @@ export function SettingsWorkspace({ close, notify, onContextChanged, initialTab 
 
   const branchNames = useMemo(() => Object.fromEntries((data?.branches ?? []).map((branch) => [branch.id, branch.name])), [data]);
   const systemNames = useMemo(() => Object.fromEntries((data?.systems ?? []).map((system) => [system.id, system.name])), [data]);
+  const visibleAccessUsers = useMemo(() => {
+    if (!data) return [];
+    const query = accessQuery.trim().toLocaleLowerCase("ru");
+    return data.users.filter((user) => {
+      if (query && ![user.displayName, user.contact, user.jobTitle, user.position, user.unit, user.role].some((value) => value?.toLocaleLowerCase("ru").includes(query))) return false;
+      if (accessStatus === "active" && (!user.hasAccess || user.status !== "Активен")) return false;
+      if (accessStatus === "unassigned" && user.hasAccess) return false;
+      if (accessStatus === "blocked" && user.status !== "Доступ приостановлен") return false;
+      if (accessBranch && !user.isAdministrative && !data.grants.some((grant) => grant.userId === user.id && grant.branchId === accessBranch)) return false;
+      if (accessRole && user.role !== accessRole) return false;
+      return true;
+    });
+  }, [data, accessQuery, accessStatus, accessBranch, accessRole]);
 
   return <div className="ahSettingsLayer">
     <button className="drawer-scrim" onClick={close} aria-label="Закрыть настройки" />
@@ -214,7 +247,7 @@ export function SettingsWorkspace({ close, notify, onContextChanged, initialTab 
       <header className="settings-head"><div><p>Управление системой</p><h2 id="settings-title">Настройки</h2><span>Филиалы, доступы, личное меню, интеграции и проверка системы</span></div><button onClick={close} aria-label="Закрыть">×</button></header>
       {loading ? <EmptyState className="ahSettingsState" density="compact" title="Загружаем настройки" description="Проверяем права, филиалы и доступные системы." /> : error || !data ? <EmptyState className="ahSettingsState" density="compact" title={error || "Настройки недоступны"} description="Рабочие права и филиалы не заменены заглушкой." action={<Button variant="secondary" onClick={() => void load()}>Повторить</Button>} /> : <>
         <div className="ahSettingsTabs"><Tabs items={settingsTabs.filter((item) => item !== "Резервные копии" || (data.me.id === "USR-OWNER" && data.me.role === "Собственник" && data.me.isAdministrative)).map((item) => ({ id: item, label: item }))} value={tab} onChange={setTab} ariaLabel="Разделы настроек" /></div>
-        <div className="settings-body">
+        <div className="settings-body" ref={settingsBodyRef}>
           {tab === "Резервные копии" && data.me.id === "USR-OWNER" && data.me.role === "Собственник" && data.me.isAdministrative ? <BackupWorkspace notify={notify} /> : null}
           {tab === "Филиалы" ? <div className="settings-grid">
             <article className="settings-card wide"><header><div><p>Рабочие контуры</p><h3>Филиалы</h3></div><span>{data.branches.length}</span></header><div className="branch-list">{data.branches.map((branch) => <div key={branch.id}><span aria-hidden="true">⌂</span><div><strong>{branch.name}</strong><small>{branch.kind} · {branch.status}</small></div><em>{data.me.isAdministrative ? "Доступен" : data.access.some((item) => item.branchId === branch.id) ? "Назначен" : "Нет доступа"}</em></div>)}</div></article>
@@ -223,9 +256,31 @@ export function SettingsWorkspace({ close, notify, onContextChanged, initialTab 
           </div> : null}
 
           {tab === "Доступы" ? <div className="settings-grid users-grid access-users-full">
+            {data.canManage && ownerDiaryOpen
+              ? <OwnerDiaryAccessForm
+                key={ownerDiarySystem}
+                atlas={ownerDiarySystem === "SYS-SCHOOL-ATLAS"}
+                grant={data.systemGrants.find((grant) => grant.userId === data.me.id && grant.systemId === ownerDiarySystem)}
+                roles={data.systemRoleOptions[ownerDiarySystem] ?? []}
+                busy={busy === "owner-diary"}
+                close={() => setOwnerDiaryOpen(false)}
+                save={async (enabled, diaryRole) => {
+                  const result = await action({ action: "saveOwnerDiaryAccess", systemId: ownerDiarySystem, enabled, diaryRole, expectedAccessVersion: data.me.accessVersion, expectedUpdatedAt: data.me.updatedAt }, "owner-diary");
+                  if (result) setOwnerDiaryOpen(false);
+                }}
+              />
+              : data.canManage && accessEmployeeId
+                ? <AccessAssignmentForm key={accessEmployeeId} user={data.users.find((user) => user.id === accessEmployeeId)!} data={data} busy={busy} headingRef={accessFormHeadingRef} close={() => setAccessEmployeeId("")} submit={invite} />
+                : null}
             <article className="settings-card wide">
-              <header><div><p>Только управление входом</p><h3>Сотрудники из раздела «Команда»</h3></div><span>{data.users.length}</span></header>
-              <div className="user-list">{data.users.map((user) => {
+              <header><div><p>Только управление входом</p><h3>Сотрудники из раздела «Команда»</h3></div><span>{visibleAccessUsers.length} из {data.users.length}</span></header>
+              <div className="access-directory-toolbar" role="search" aria-label="Фильтры доступов">
+                <label><span>Поиск сотрудника</span><input type="search" value={accessQuery} onChange={(event) => setAccessQuery(event.target.value)} placeholder="Имя, телефон, должность" /></label>
+                <label><span>Статус доступа</span><select value={accessStatus} onChange={(event) => setAccessStatus(event.target.value)}><option value="all">Все статусы</option><option value="active">Доступ активен</option><option value="unassigned">Доступ не выдан</option><option value="blocked">Заблокирован</option></select></label>
+                <label><span>Филиал доступа</span><select value={accessBranch} onChange={(event) => setAccessBranch(event.target.value)}><option value="">Все филиалы</option>{data.branches.map((branch) => <option key={branch.id} value={branch.id}>{branch.name}</option>)}</select></label>
+                <label><span>Роль</span><select value={accessRole} onChange={(event) => setAccessRole(event.target.value)}><option value="">Все роли</option>{[...new Set(data.users.map((user) => user.role))].sort((a, b) => a.localeCompare(b, "ru")).map((role) => <option key={role} value={role}>{role}</option>)}</select></label>
+              </div>
+              {visibleAccessUsers.length ? <div className="user-list">{visibleAccessUsers.map((user) => {
                 const granted = data.grants.filter((grant) => grant.userId === user.id).map((grant) => branchNames[grant.branchId]).filter(Boolean);
                 const assignedSystems = data.systemGrants.filter((grant) => grant.userId === user.id);
                 const diaryGrant = assignedSystems.find((grant) => grant.systemId === "SYS-SCHOOL-1-11");
@@ -242,7 +297,7 @@ export function SettingsWorkspace({ close, notify, onContextChanged, initialTab 
                   </div>
                   <b className={user.status === "Активен" ? "active" : ""}>{user.status === "Доступ приостановлен" ? "Заблокирован" : user.hasAccess ? user.invitationStatus : "Доступ не выдан"}</b>
                   {data.canManage && user.id !== data.me.id ? <div className="user-access-buttons">
-                    <button className="access-configure" disabled={!user.contact} title={!user.contact ? "Сначала укажите телефон или email в карточке сотрудника" : undefined} onClick={() => { setOwnerDiaryOpen(false); setAccessEmployeeId(user.id); }}>{user.hasAccess ? "Изменить доступ" : "Выдать доступ"}</button>
+                    <button className="access-configure" disabled={!user.contact} title={!user.contact ? "Сначала укажите телефон или email в карточке сотрудника" : undefined} onClick={() => openAccessEditor(user.id)}>{user.hasAccess ? "Изменить доступ" : "Выдать доступ"}</button>
                     {user.hasAccess ? <button className="temporary-access" disabled={busy === `temporary-${user.id}` || user.status !== "Активен"} title={user.status !== "Активен" ? "Сначала восстановите доступ сотрудника" : "Создать временный вход только в ArtHello OS"} onClick={() => void issueTemporaryCredential(user)}>{busy === `temporary-${user.id}` ? "Создаём…" : "Временный вход"}</button> : null}
                     {user.hasAccess && diaryGrant ? <button disabled={busy === `password-${user.id}`} onClick={() => void action({ action: "resetPassword", userId: user.id, expectedAccessVersion: user.accessVersion }, `password-${user.id}`)}>Завершить входы</button> : null}
                     {user.hasAccess ? user.status === "Доступ приостановлен"
@@ -254,24 +309,9 @@ export function SettingsWorkspace({ close, notify, onContextChanged, initialTab 
                     <button className="access-configure" onClick={() => { setAccessEmployeeId(""); setOwnerDiarySystem("SYS-SCHOOL-ATLAS"); setOwnerDiaryOpen(true); }}>Настроить дневник Атласа</button>
                   </div> : null}
                 </div>;
-              })}</div>
+              })}</div> : <p className="access-directory-empty">По выбранным фильтрам сотрудников нет.</p>}
             </article>
-            {data.canManage && ownerDiaryOpen
-              ? <OwnerDiaryAccessForm
-                key={ownerDiarySystem}
-                atlas={ownerDiarySystem === "SYS-SCHOOL-ATLAS"}
-                grant={data.systemGrants.find((grant) => grant.userId === data.me.id && grant.systemId === ownerDiarySystem)}
-                roles={data.systemRoleOptions[ownerDiarySystem] ?? []}
-                busy={busy === "owner-diary"}
-                close={() => setOwnerDiaryOpen(false)}
-                save={async (enabled, diaryRole) => {
-                  const result = await action({ action: "saveOwnerDiaryAccess", systemId: ownerDiarySystem, enabled, diaryRole, expectedAccessVersion: data.me.accessVersion, expectedUpdatedAt: data.me.updatedAt }, "owner-diary");
-                  if (result) setOwnerDiaryOpen(false);
-                }}
-              />
-              : data.canManage && accessEmployeeId
-                ? <AccessAssignmentForm key={accessEmployeeId} user={data.users.find((user) => user.id === accessEmployeeId)!} data={data} busy={busy} close={() => setAccessEmployeeId("")} submit={invite} />
-                : <div className="settings-boundary access-source-boundary"><strong>Сотрудники здесь не создаются</strong><span>Добавление, импорт и исправление персональных данных выполняются в «Команда → Сотрудники». Здесь выбирается готовая карточка и отдельно подтверждаются системы, филиалы и роль доступа.</span></div>}
+            {!ownerDiaryOpen && !accessEmployeeId ? <div className="settings-boundary access-source-boundary"><strong>Сотрудники здесь не создаются</strong><span>Добавление, импорт и исправление персональных данных выполняются в «Команда → Сотрудники». Здесь выбирается готовая карточка и отдельно подтверждаются системы, филиалы и роль доступа.</span></div> : null}
             {credentialLink ? <div className="settings-boundary credential-result"><strong>Одноразовая ссылка готова</strong><span>Передайте её сотруднику безопасным каналом. Повторный сброс аннулирует предыдущую.</span><input readOnly value={credentialLink} onFocus={(event) => event.currentTarget.select()} /><button type="button" onClick={() => void copyCredential(credentialLink, "Ссылка")}>Скопировать ссылку</button></div> : null}
             {data.syncEvents.some((event) => retryableSyncStatus(event.status)) ? <article className="settings-card wide">
               <header><div><p>Надёжная доставка</p><h3>Повторить синхронизацию</h3></div><span>{data.syncEvents.filter((event) => retryableSyncStatus(event.status)).length}</span></header>
@@ -509,7 +549,7 @@ function OwnerDiaryAccessForm({ grant, roles, busy, close, save, atlas = false }
   </form>;
 }
 
-function AccessAssignmentForm({ user, data, busy, close, submit }: { user: SettingsUser; data: SettingsData; busy: string; close: () => void; submit: (event: FormEvent<HTMLFormElement>) => void }) {
+function AccessAssignmentForm({ user, data, busy, headingRef, close, submit }: { user: SettingsUser; data: SettingsData; busy: string; headingRef: RefObject<HTMLHeadingElement | null>; close: () => void; submit: (event: FormEvent<HTMLFormElement>) => void }) {
   const savedBranchIds = data.grants.filter((grant) => grant.userId === user.id).map((grant) => grant.branchId);
   const branchIds = new Set(user.hasAccess ? savedBranchIds : user.employeeBranchIds ?? []);
   const systemGrants = data.systemGrants.filter((grant) => grant.userId === user.id);
@@ -525,7 +565,7 @@ function AccessAssignmentForm({ user, data, busy, close, submit }: { user: Setti
     setAllowedModules((current) => checked ? [...new Set([...current, moduleId])] : current.filter((id) => id !== moduleId));
   }
   return <form className="settings-card settings-form invite-form access-assignment-form" onSubmit={submit}>
-    <header><div><p>Выдача доступа</p><h3>{user.displayName}</h3><small>{humanPosition(user.jobTitle || user.position, user.role)}{user.unit ? ` · ${user.unit}` : ""}</small></div><button type="button" onClick={close} aria-label="Закрыть форму">×</button></header>
+    <header><div><p>Выдача доступа</p><h3 ref={headingRef} tabIndex={-1}>{user.displayName}</h3><small>{humanPosition(user.jobTitle || user.position, user.role)}{user.unit ? ` · ${user.unit}` : ""}</small></div><button type="button" onClick={close} aria-label="Закрыть форму">×</button></header>
     <div className="access-form-columns">
       <div>
         <label><span>Логин из карточки сотрудника</span><input readOnly value={user.contact} aria-readonly="true" /><input type="hidden" name="contact" value={user.contact} /><small>Телефон или email изменяется только в «Команда → Сотрудники».</small></label>

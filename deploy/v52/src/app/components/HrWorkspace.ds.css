@@ -290,6 +290,33 @@
   gap: 16px;
 }
 
+.ahHrPage .staff-filter-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 12px;
+  margin: 16px 0;
+}
+
+.ahHrPage .staff-filter-toolbar label {
+  display: grid;
+  gap: 6px;
+  min-width: min(100%, 220px);
+}
+
+.ahHrPage .staff-filter-toolbar input,
+.ahHrPage .staff-filter-toolbar select {
+  min-height: 40px;
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--ah-color-border);
+  border-radius: 10px;
+  background: var(--ah-color-surface);
+  color: var(--ah-color-text-primary);
+}
+
+.ahHrPage .staff-filter-toolbar > span { color: var(--ah-color-text-secondary); }
+
 .ahHrPage .employee-grid > article {
   overflow: hidden;
 }
