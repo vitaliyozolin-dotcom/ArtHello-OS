@@ -237,6 +237,8 @@ jobs:
           echo '### ArtHello runner checkout directories by apparent bytes'
           test -d "$runner_root/_work/ArtHello-OS"
           du -x -B1 -d1 "$runner_root/_work/ArtHello-OS" 2>/dev/null | sort -nr | sed -n '1,80p'
+          test "$(realpath "$GITHUB_WORKSPACE")" = "$(realpath "$runner_root/_work/ArtHello-OS/ArtHello-OS")"
+          du -x -B1 -d2 "$GITHUB_WORKSPACE" 2>/dev/null | sort -nr | sed -n '1,80p'
           echo '### Known service directories by apparent bytes'
           for path in /opt /srv /var/log "$docker_root"; do
             if [ -d "$path" ]; then
