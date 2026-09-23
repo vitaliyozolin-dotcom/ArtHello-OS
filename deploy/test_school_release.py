@@ -21,6 +21,10 @@ def runtime():
     return old
 
 class SchoolDeliveryTests(unittest.TestCase):
+    def test_inventory_recognizes_the_exact_live_predecessor_source(self):
+        inventory = (ROOT/'deploy/school_inventory.py').read_text()
+        self.assertIn(repr(school.release.PINS['school'][0]), inventory)
+
     def test_exact_ports_environment_commands_and_volumes_are_retained(self):
         old=runtime();plan=school.release.runtime_plan(old,'school','sha256:'+'e'*64,'f'*40,'9'*40)
         self.assertEqual(plan['environment'],old['Config']['Env'])
