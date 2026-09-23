@@ -19,6 +19,7 @@ export type EntityListOptions = {
   q: string;
   quality: string;
   review: string;
+  branch?: string;
   mode: string;
   offset: number;
   limit: number;
@@ -48,6 +49,7 @@ export function listEntities(rows: EntityListRow[], options: EntityListOptions) 
       const status = options.status ?? "current";
       if (status === "current" && row.status === "Архив") return false;
       if (status === "archive" && row.status !== "Архив") return false;
+      if (options.branch && !familyScopes(row).includes(options.branch)) return false;
     }
     if (!query) return true;
     return [row.id, row.displayName, row.sourceRecordId, row.scope, row.sourceSystem]
@@ -73,4 +75,13 @@ export function listEntities(rows: EntityListRow[], options: EntityListOptions) 
     displayRows,
     duplicateKeys,
   };
+}
+
+function familyScopes(row: EntityListRow): string[] {
+  try {
+    const metadata = JSON.parse(row.metadata) as { branchAssignments?: Array<{ scope?: unknown; active?: unknown }> };
+    const active = metadata.branchAssignments?.filter((item) => item.active === true && typeof item.scope === "string").map((item) => item.scope as string) ?? [];
+    if (active.length) return active;
+  } catch { /* Older cards have only their primary scope. */ }
+  return [row.scope];
 }

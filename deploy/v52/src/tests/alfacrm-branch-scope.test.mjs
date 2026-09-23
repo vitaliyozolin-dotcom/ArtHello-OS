@@ -38,4 +38,8 @@ test('current family list excludes archives and archive copies do not flag activ
  assert.equal(current.total,1);assert.equal(current.entities[0].dataQuality,'Проверено');
  assert.equal(listEntities(rows,{...options,status:'archive'}).entities[0].id,'F-2');
  assert.equal(listEntities(rows,{...options,status:'all'}).total,2);
+ const merged={...row,metadata:JSON.stringify({branchAssignments:[{scope:'School',active:true},{scope:'Atlas',active:true}]})};
+ assert.equal(listEntities([merged],{...options,branch:'Atlas'}).total,1);
+ assert.equal(listEntities([merged],{...options,branch:'Other'}).total,0);
+ assert.equal(listEntities([row],{...options,branch:'School'}).total,1);
 });

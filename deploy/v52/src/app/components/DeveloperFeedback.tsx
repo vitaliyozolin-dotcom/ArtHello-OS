@@ -32,6 +32,7 @@ export function DeveloperFeedback({ moduleId }: { moduleId: string }) {
   const [open, setOpen] = useState(false), [view, setView] = useState<View>('create');
   const [kind, setKind] = useState<keyof typeof kinds>('bug');
   const [title, setTitle] = useState(''), [body, setBody] = useState('');
+  const [files, setFiles] = useState<File[]>([]);
   const [list, setList] = useState<FeedbackList>({ items: [], nextBefore: null, canManage: false });
   const [loading, setLoading] = useState(false), [saving, setSaving] = useState(false);
   const [error, setError] = useState(''), [notice, setNotice] = useState('');
@@ -59,8 +60,9 @@ export function DeveloperFeedback({ moduleId }: { moduleId: string }) {
     if (!submissionId.current) { submissionId.current = crypto.randomUUID(); submittedModule.current = moduleId; }
     setSaving(true); setError(''); setNotice('');
     try {
-      await api('/api/developer-feedback', { action: 'create', submissionId: submissionId.current, kind, title, body, moduleId: submittedModule.current });
-      setTitle(''); setBody(''); submissionId.current = '';
+      const images = await Promise.all(files.map(async (file) => ({ filename: file.name, mimeType: file.type, base64: await new Promise<string>((resolve, reject) => { const reader = new FileReader(); reader.onload = () => resolve(String(reader.result).split(',')[1] ?? ''); reader.onerror = () => reject(new Error('Не удалось прочитать изображение')); reader.readAsDataURL(file); }) })));
+      await api('/api/developer-feedback', { action: 'create', submissionId: submissionId.current, kind, title, body, moduleId: submittedModule.current, images });
+      setTitle(''); setBody(''); setFiles([]); submissionId.current = '';
       setNotice('Обращение сохранено. Его статус виден в списке.');
       setView('mine'); await load('mine');
     } catch (cause) { setError(cause instanceof Error ? cause.message : 'Не удалось сохранить обращение'); }
@@ -87,12 +89,14 @@ export function DeveloperFeedback({ moduleId }: { moduleId: string }) {
         <label>Тип обращения<select value={kind} onChange={(event) => { changed(); setKind(event.target.value as keyof typeof kinds); }} disabled={saving}>{Object.entries(kinds).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
         <label>Тема<input value={title} onChange={(event) => { changed(); setTitle(event.target.value); }} maxLength={160} required disabled={saving} /></label>
         <label>Описание<textarea value={body} onChange={(event) => { changed(); setBody(event.target.value); }} maxLength={6000} rows={6} required disabled={saving} placeholder={kind === 'bug' ? 'Что вы делали, что произошло и какой результат ожидали?' : 'Что стоит изменить и как это поможет в работе?'} /></label>
+        <label>Фотографии и скриншоты (до 3 файлов, каждый до 1 МБ)<input type="file" accept="image/png,image/jpeg,image/webp,image/gif" multiple disabled={saving} onChange={(event) => { changed(); const selected = Array.from(event.target.files ?? []); if (selected.length > 3 || selected.some((file) => file.size > 1_048_576 || !['image/png','image/jpeg','image/webp','image/gif'].includes(file.type))) { setError('Выберите до трёх изображений PNG, JPEG, WebP или GIF размером до 1 МБ каждое.'); setFiles([]); event.target.value = ''; } else { setError(''); setFiles(selected); } }} /></label>
+        {files.length ? <p className="ahFeedbackHint">Прикреплено: {files.map((file) => file.name).join(', ')}</p> : null}
         <p className="ahFeedbackHint">Обращение сохраняется в системе и доступно вам и собственнику.</p>
         <footer><button type="button" onClick={close} disabled={saving}>Закрыть</button><button type="submit" disabled={saving || !title.trim() || !body.trim()}>{saving ? 'Сохраняем…' : 'Отправить'}</button></footer>
       </form> : <section aria-label={view === 'all' ? 'Все обращения' : 'Мои обращения'} aria-busy={loading}>
         <div className="ahFeedbackListActions"><button type="button" onClick={() => void load(view)} disabled={loading || saving}>Обновить список</button></div>
         {!loading && !error && !list.items.length ? <p className="ahFeedbackEmpty">Обращений пока нет.</p> : null}
-        {list.items.map((item) => <article key={item.id} className="ahFeedbackCard"><div className="ahFeedbackMeta"><span>{kinds[item.kind]}</span><time dateTime={item.created_at}>{new Date(item.created_at).toLocaleString('ru-RU')}</time></div><h3>{item.title}</h3>{view === 'all' ? <p className="ahFeedbackAuthor">{item.author_name}</p> : null}<p className="ahFeedbackBody">{item.body}</p>{view === 'all' && list.canManage ? <label>Статус<select aria-label={`Статус обращения: ${item.title}`} value={item.status} disabled={saving} onChange={(event) => void setStatus(item, event.target.value as FeedbackStatus)}>{Object.entries(statuses).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label> : <p className="ahFeedbackStatus">{statuses[item.status]}</p>}</article>)}
+        {list.items.map((item) => <article key={item.id} className="ahFeedbackCard"><div className="ahFeedbackMeta"><span>{kinds[item.kind]}</span><time dateTime={item.created_at}>{new Date(item.created_at).toLocaleString('ru-RU')}</time></div><h3>{item.title}</h3>{view === 'all' ? <p className="ahFeedbackAuthor">{item.author_name}</p> : null}<p className="ahFeedbackBody">{item.body}</p>{item.images?.length ? <div className="ahFeedbackImages">{item.images.map((image) => <a key={image.id} href={`/api/developer-feedback?image=${image.id}`} target="_blank" rel="noopener noreferrer"><img src={`/api/developer-feedback?image=${image.id}`} alt={image.filename} loading="lazy" /><span>{image.filename}</span></a>)}</div> : null}{view === 'all' && list.canManage ? <label>Статус<select aria-label={`Статус обращения: ${item.title}`} value={item.status} disabled={saving} onChange={(event) => void setStatus(item, event.target.value as FeedbackStatus)}>{Object.entries(statuses).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label> : <p className="ahFeedbackStatus">{statuses[item.status]}</p>}</article>)}
         {loading ? <p role="status">Загружаем обращения…</p> : null}
         {list.nextBefore ? <button type="button" onClick={() => void load(view, list.nextBefore ?? undefined)} disabled={loading || saving}>Показать ещё</button> : null}
       </section>}

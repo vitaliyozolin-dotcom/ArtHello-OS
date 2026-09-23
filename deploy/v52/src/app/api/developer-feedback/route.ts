@@ -12,7 +12,7 @@ import {
 import { hasTrustedMutationOrigin } from '../../../lib/request-security';
 
 export const dynamic = 'force-dynamic';
-const MAX_BODY_BYTES = 26000;
+const MAX_BODY_BYTES = 4_300_000;
 const knownModules = moduleCatalog.map((module) => module.id);
 
 function response(body: unknown, status = 200) {
@@ -40,6 +40,19 @@ export async function GET(request: Request) {
   const actor = await authenticate(request);
   if (actor instanceof Response) return actor;
   const query = new URL(request.url).searchParams;
+  const imageId = query.get('image');
+  if (imageId !== null) {
+    if (!/^[1-9][0-9]*$/.test(imageId) || !Number.isSafeInteger(Number(imageId))) return response({ error: 'Некорректное вложение' }, 400);
+    try {
+      await ensureCoreTables(); await ensureDeveloperFeedbackTables(env.DB);
+      const image = await env.DB.prepare(`SELECT i.image_base64,i.mime_type FROM developer_feedback_images i
+        JOIN developer_feedback f ON f.id=i.feedback_id WHERE i.id=? AND (f.author_user_id=? OR ?=1)`)
+        .bind(Number(imageId), actor.userId, actor.owner ? 1 : 0).first<{ image_base64: string; mime_type: string }>();
+      if (!image) return response({ error: 'Вложение не найдено' }, 404);
+      const bytes = Uint8Array.from(atob(image.image_base64), (char) => char.charCodeAt(0));
+      return new Response(bytes, { headers: { 'content-type': image.mime_type, 'content-disposition': 'inline', 'x-content-type-options': 'nosniff', 'cache-control': 'private, no-store' } });
+    } catch { return response({ error: 'Не удалось загрузить вложение' }, 503); }
+  }
   const scope = query.get('scope') ?? 'mine';
   if (scope !== 'mine' && scope !== 'all') return response({ error: 'Неизвестный список обращений' }, 400);
   if (scope === 'all' && !actor.owner) return response({ error: 'Все обращения доступны только собственнику' }, 403);
@@ -62,6 +75,7 @@ export async function POST(request: Request) {
     if (new TextEncoder().encode(raw).byteLength > MAX_BODY_BYTES) return response({ error: 'Обращение слишком большое' }, 413);
     const parsed: unknown = JSON.parse(raw);
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return response({ error: 'Некорректное обращение' }, 400);
+    if (new TextEncoder().encode(raw).byteLength > 26000 && !Array.isArray((parsed as Record<string, unknown>).images)) return response({ error: 'Обращение слишком большое' }, 413);
     value = parsed as Record<string, unknown>;
   } catch { return response({ error: 'Некорректный JSON' }, 400); }
   if (value.action === 'setStatus' && !actor.owner) return response({ error: 'Статус меняет только собственник' }, 403);

@@ -86,7 +86,7 @@ test('SQLite migration reapply preserves prior rows and metadata delta is only t
     }
     db.exec("INSERT INTO app_users (id,contact_type,contact,display_name,role,invited_by) VALUES ('legacy','email','legacy@example.test','Legacy','OWNER','system')");
     const sql = readFileSync(new URL('0025_developer_feedback.sql', directory), 'utf8');
-    assert.deepEqual(sql.split('--> statement-breakpoint').map((s) => s.trim().replace(/;$/, '')).filter(Boolean), developerFeedbackSchema);
+    assert.deepEqual(sql.split('--> statement-breakpoint').map((s) => s.trim().replace(/;$/, '')).filter(Boolean), developerFeedbackSchema.slice(0, 5));
     db.exec(sql); db.exec(sql);
     assert.equal(db.prepare("SELECT COUNT(*) AS n FROM app_users WHERE id='legacy'").get().n, 1);
     assert.equal(db.prepare('PRAGMA integrity_check').get().integrity_check, 'ok');
@@ -94,13 +94,20 @@ test('SQLite migration reapply preserves prior rows and metadata delta is only t
     const journal = JSON.parse(readFileSync(new URL('meta/_journal.json', directory), 'utf8'));
     const before = JSON.parse(readFileSync(new URL('meta/0024_snapshot.json', directory), 'utf8'));
     const after = JSON.parse(readFileSync(new URL('meta/0025_snapshot.json', directory), 'utf8'));
-    assert.equal(journal.entries.at(-1).tag, '0025_developer_feedback');
+    assert.equal(journal.entries.at(-2).tag, '0025_developer_feedback');
     assert.equal(after.prevId, before.id);
     assert.deepEqual(Object.keys(after.tables).filter((key) => !before.tables[key]), ['developer_feedback','developer_feedback_events']);
     for (const [key, table] of Object.entries(before.tables)) assert.deepEqual(after.tables[key], table);
     db.exec(readFileSync(new URL('rollbacks/0025_developer_feedback.down.sql', directory), 'utf8'));
     assert.equal(db.prepare("SELECT COUNT(*) AS n FROM app_users WHERE id='legacy'").get().n, 1);
     db.exec(sql);
+    const imageSql = readFileSync(new URL('0026_developer_feedback_images.sql', directory), 'utf8');
+    assert.deepEqual(imageSql.split('--> statement-breakpoint').map((s) => s.trim().replace(/;$/, '')).filter(Boolean), developerFeedbackSchema.slice(5));
+    db.exec(imageSql); db.exec(imageSql);
+    assert.equal(db.prepare('PRAGMA integrity_check').get().integrity_check, 'ok');
+    const imagesSnapshot = JSON.parse(readFileSync(new URL('meta/0026_snapshot.json', directory), 'utf8'));
+    assert.equal(imagesSnapshot.prevId, after.id);
+    assert.deepEqual(Object.keys(imagesSnapshot.tables).filter((key) => !after.tables[key]), ['developer_feedback_images']);
     assert.equal(db.prepare('PRAGMA integrity_check').get().integrity_check, 'ok');
   } finally { db.close(); }
 });
@@ -117,6 +124,22 @@ test('repeated HTTP delivery produces one persistent record and one audit event'
   assert.equal(first.id, retry.id); assert.equal(first.author_name, 'User A');
   assert.equal(db.sqlite.prepare('SELECT COUNT(*) AS n FROM developer_feedback_events').get().n, 1);
   assert.equal(await service.createFeedback(db, a, { ...data, title: 'Changed after save' }), null);
+});
+
+test('an image is saved with its report and readable only by its author or canonical owner', async (t) => {
+  const db = await ready(t);
+  const image = { filename: 'screen.png', mimeType: 'image/png', base64: Buffer.from([137,80,78,71,13,10,26,10,0,0,0,0]).toString('base64') };
+  globalThis.__feedbackTest = { db, context: context() };
+  const saved = await route.POST(request(payload({ images: [image] })));
+  assert.equal(saved.status, 201);
+  const report = (await route.GET(request())).json();
+  const imageId = (await report).items[0].images[0].id;
+  assert.equal((await route.GET(request(undefined, {}, `?image=${imageId}`))).status, 200);
+  globalThis.__feedbackTest.context = { ...context(), appUserId: 'b' };
+  assert.equal((await route.GET(request(undefined, {}, `?image=${imageId}`))).status, 404);
+  globalThis.__feedbackTest.context = context('OWNER', true);
+  assert.equal((await route.GET(request(undefined, {}, `?image=${imageId}`))).status, 200);
+  assert.equal(service.parseFeedbackSubmission(payload({ images: [{ ...image, mimeType: 'image/svg+xml' }] }), ['education']), null);
 });
 
 test('same submission UUID from a different user cannot expose or overwrite the first user', async (t) => {

@@ -17,7 +17,7 @@ export async function GET(request:Request){
       const context=await getAuthenticatedRequestContext(request);
       if(!context)return Response.json({error:"Требуется вход"},{status:401});
       if(!canAccessApi(context.auth.user,"/api/families","GET"))return Response.json({error:"Нет доступа к семьям"},{status:403});
-      if(!isCanonicalOwnerContext(context)){
+      if(!isCanonicalOwnerContext(context) && !context.auth.user.isAdministrative){
         const grants=(await env.DB.prepare("SELECT b.name FROM user_branch_access a JOIN organization_branches b ON b.id=a.branch_id WHERE a.user_id=? AND b.status='Активен'").bind(context.appUserId).all<{name:string}>()).results;
         if(identities.cards.some(card=>familyIds.includes(card.id)&&!grants.some(grant=>grant.name===card.scope)))return Response.json({error:"Нет доступа ко всем филиалам единой карточки"},{status:403});
       }
@@ -72,6 +72,13 @@ export async function PATCH(request:Request){
     const[currentFamily]=await db.select().from(entities).where(eq(entities.id,familyId)).limit(1);if(!currentFamily||currentFamily.entityType!=="Семья")return Response.json({error:"Семья не найдена"},{status:404});
     if(currentFamily.status==="Объединена")return Response.json({error:"Откройте основную карточку"},{status:409});
     const identities=await readIdentityIndex(env.DB);const familyIds=identities.members(familyId);
+    const context=await getAuthenticatedRequestContext(request);
+    if(!context)return Response.json({error:"Требуется вход"},{status:401});
+    if(!canAccessApi(context.auth.user,"/api/families","PATCH"))return Response.json({error:"Нет прав на изменение семей"},{status:403});
+    if(!isCanonicalOwnerContext(context)&&!context.auth.user.isAdministrative){
+      const grants=(await env.DB.prepare("SELECT b.name FROM user_branch_access a JOIN organization_branches b ON b.id=a.branch_id WHERE a.user_id=? AND b.status='Активен'").bind(context.appUserId).all<{name:string}>()).results;
+      if(identities.cards.some(card=>familyIds.includes(card.id)&&!grants.some(grant=>grant.name===card.scope)))return Response.json({error:"Нужны права на все филиалы семьи"},{status:403});
+    }
     const links=await db.select().from(entityLinks).where(inArray(entityLinks.fromEntityId,familyIds));
     if(![parentId,childId].every(id=>links.some(link=>identities.canonical(link.toEntityId)===id)))return Response.json({error:"Родитель или ребёнок не принадлежит этой семье"},{status:409});
     const currentMembers=await db.select().from(entities).where(inArray(entities.id,[parentId,childId]));
