@@ -8,6 +8,8 @@ import "./AlfaCrmSetupWizard.css";
 
 type ModuleKey = "families" | "staff" | "groups" | "lessons" | "subscriptions" | "finance";
 type ModuleState = {
+  deferredCustomer?: { key: string; hash: string };
+  previewDeferredCustomer?: { key: string; hash: string };
   scopeContract?: string;
   status: "not_started" | "previewed" | "importing" | "imported" | "error";
   previewCount: number;
@@ -68,6 +70,7 @@ type ActionResponse = Partial<AlfaPayload> & {
 };
 
 type CustomerPreview = {
+  archiveBreakdown?: Array<{ branch: string; previousStatus: string; reason: string; count: number }>;
   comparison?: { archiveIds:string[]; preservedArchiveIds:string[]; reviewIds:string[]; updateIds:string[]; moves:Array<{id:string;from:string;to:string}>; newSourceKeys:string[] };
   observedAt: string; branchNames: Record<string, string>;
   byBranch: Record<string, { observed: number; included: number; active: number; open: number; single: number; leads: number; excluded: number; review: number }>;
@@ -250,7 +253,7 @@ export function AlfaCrmSetupWizard({ roleCode, close, notify }: {
 
   async function importData(definition: ModuleDefinition, period: { dateFrom: string; dateTo: string; transitionDate: string }, previewToken: string) {
     const key = `import-${definition.key}`;
-    const body = { ...moduleRequest("importModule", definition, period), previewToken };
+    const body = { ...moduleRequest("importModule", definition, period, payload.state), previewToken };
     setBusy(key);
     try {
       const result = definition.kind === "chunked"
@@ -386,6 +389,7 @@ export function AlfaCrmSetupWizard({ roleCode, close, notify }: {
                 <p>Межфилиальных пересечений по ID: {customerPreview.intersections.length}. Чужой филиал: {customerPreview.foreignBranch}. Исключены по состоянию записи: {customerPreview.excludedLifecycle}. Не подтверждено: {customerPreview.unknown}. Повторов: {customerPreview.duplicates}.</p>
                 <p>Школьных назначений для проверки разнесения: {customerPreview.schoolAssignments.length}.</p>
                 {customerPreview.comparison ? <p>Предварительный план по карточкам ОС: обновить {customerPreview.comparison.updateIds.length}; создать исходных связей {customerPreview.comparison.newSourceKeys.length}; перенести в другой филиал {customerPreview.comparison.moves.length}; архивировать исходных связей {customerPreview.comparison.archiveIds.length}; сохранить ручной архив {customerPreview.comparison.preservedArchiveIds.length}; требуют сверки {customerPreview.comparison.reviewIds.length}. Изменения не применены.</p> : null}
+                {customerPreview.archiveBreakdown?.length ? <details><summary>Причины архива и прежние статусы</summary><table><thead><tr><th>Филиал</th><th>Прежний статус</th><th>Причина</th><th>Карточек</th></tr></thead><tbody>{customerPreview.archiveBreakdown.map(row => <tr key={`${row.branch}:${row.previousStatus}:${row.reason}`}><td>{customerPreview.branchNames[row.branch] ?? row.branch}</td><td>{row.previousStatus}</td><td>{row.reason}</td><td>{row.count}</td></tr>)}</tbody></table></details> : null}
               </div> : null}
               {payload.scopeAudit?<div role="status"><p>{payload.scopeAudit.source}. {payload.scopeAudit.note}</p>
                 <table><thead><tr><th>Раздел</th><th>Записей</th><th>В своём филиале</th><th>Чужой филиал</th><th>Неактивные</th><th>Не подтверждено</th></tr></thead><tbody>
@@ -440,7 +444,7 @@ export function AlfaCrmSetupWizard({ roleCode, close, notify }: {
                 busy={busy}
                 canManage={payload.canManage && !state.autosync?.enabled}
                 importEnabled={payload.importEnabled}
-                preview={() => post(moduleRequest("previewModule", definition, periods[definition.key]), `preview-${definition.key}`)}
+                preview={() => post(moduleRequest("previewModule", definition, periods[definition.key], state), `preview-${definition.key}`)}
                 importData={() => importData(definition, periods[definition.key], state.modules[definition.key].previewToken)}
               />)}
             </div>
@@ -524,10 +528,14 @@ function ModuleStatus({ state }: { state: ModuleState }) {
   return <span className="ahAlfaCrmModuleStatus waiting">Не загружено</span>;
 }
 
-function moduleRequest(action: "previewModule" | "importModule", definition: ModuleDefinition, period: { dateFrom: string; dateTo: string; transitionDate: string }) {
+function moduleRequest(action: "previewModule" | "importModule", definition: ModuleDefinition, period: { dateFrom: string; dateTo: string; transitionDate: string }, state?: AlfaState) {
+  const deferred = state?.modules.families.deferredCustomer;
+  const deferredBranch = definition.key === 'families' && deferred && /^[1-9]\d*:[1-9]\d*$/.test(deferred.key)
+    ? deferred.key.split(':')[0] : undefined;
   return {
     action,
     module: definition.key,
+    ...(deferredBranch ? { deferMissingStatusBranch: deferredBranch } : {}),
     ...(definition.kind === "period" ? { dateFrom: period.dateFrom, dateTo: period.dateTo } : {}),
     ...(definition.kind === "transition" ? { transitionDate: period.transitionDate } : {}),
   };
