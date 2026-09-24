@@ -64,8 +64,11 @@ jobs:
               for i in 0 1; do
                 id="${ids[$i]}"; tag="${tags[$i]}"
                 snapshot="$(docker image inspect "$id")"
+                jq -r --arg id "$id" --arg tag "$tag" \
+                  '.[0] | "IMAGE_GUARD_INDEX='"$i"' ID_MATCH=\(.Id == $id) TAG_MATCH=\(.RepoTags == [$tag]) DIGEST_COUNT=\(.RepoDigests | length)"' \
+                  <<<"$snapshot"
                 jq -e --arg id "$id" --arg tag "$tag" \
-                  'length == 1 and .[0].Id == $id and .[0].RepoTags == [$tag] and (.[0].RepoDigests | length == 0)' \
+                  'length == 1 and .[0].Id == $id and .[0].RepoTags == [$tag]' \
                   <<<"$snapshot" >/dev/null
                 bound="$(docker image inspect "$tag" --format '{{.Id}}')"
                 test "$bound" = "$id"
