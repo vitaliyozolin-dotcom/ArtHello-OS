@@ -677,10 +677,15 @@ async function importModule(context: ImportContext, body: Record<string, unknown
   let rejected = 0;
   let invalidBalanceCount = 0;
   let projectionBlocked = false;
+  let lessonRejectionReasons: { missingGroup: number; missingDate: number; unknownGroup: number } | undefined;
   if (module === "families") ({ accepted, rejected } = await canonicalizeFamilies(projectionRows, state, localBranches, context.actor));
   if (module === "staff") ({ accepted, rejected } = await canonicalizeStaff(projectionRows, state, localBranches, context.actor));
   if (module === "groups") ({ accepted, rejected } = await canonicalizeGroups(projectionRows, state, localBranches));
-  if (module === "lessons") ({ accepted, rejected } = await canonicalizeLessons(projectionRows, state, context.actor));
+  if (module === "lessons") {
+    const result = await canonicalizeLessons(projectionRows, state, context.actor);
+    ({ accepted, rejected } = result);
+    lessonRejectionReasons = result.rejectionReasons;
+  }
   if (module === "subscriptions") ({ accepted, rejected, invalidBalanceCount } = await canonicalizeSubscriptions(projectionRows, state));
   if (module === "finance") ({ accepted, rejected, projectionBlocked } = await canonicalizeFinance(projectionRows));
 
@@ -712,7 +717,7 @@ async function importModule(context: ImportContext, body: Record<string, unknown
     cursor: complete || rejected > 0 ? 0 : nextCursor,
     dateFrom: params.dateFrom,
     dateTo: params.dateTo,
-    note: projectionBlocked ? FINANCE_DIRECTION_UNVERIFIED_MESSAGE : rejected ? `Пропущено записей: ${rejected}.${invalidBalanceCount ? ` Остаток отсутствует или не является корректным числом: ${invalidBalanceCount}; прежние подтверждённые остатки сохранены.` : ""} Выбывшие карточки не архивировались; исправьте данные и повторите предпросмотр.` : complete
+    note: projectionBlocked ? FINANCE_DIRECTION_UNVERIFIED_MESSAGE : rejected ? `Пропущено записей: ${rejected}.${lessonRejectionReasons ? ` Без группы или ID: ${lessonRejectionReasons.missingGroup}; без даты: ${lessonRejectionReasons.missingDate}; группа отсутствует в текущем справочнике: ${lessonRejectionReasons.unknownGroup}.` : ""}${invalidBalanceCount ? ` Остаток отсутствует или не является корректным числом: ${invalidBalanceCount}; прежние подтверждённые остатки сохранены.` : ""} Выбывшие карточки не архивировались; исправьте данные и повторите предпросмотр.` : complete
       ? moduleCompletionNote(module) + (deferredCustomer ? ' Одна запись без статуса исключена по решению собственника; её карточки и связи сохранены.' : '')
       : `Загружено пакетами: обработано клиентов ${nextCursor}. Следующий пакет запускается автоматически.`,
   };
@@ -730,6 +735,7 @@ async function importModule(context: ImportContext, body: Record<string, unknown
       rawStored: rawCount,
       accepted,
       rejected,
+      ...(lessonRejectionReasons ? { lessonRejectionReasons } : {}),
       deferredCustomer,
       invalidBalanceCount,
       projectionBlocked,
@@ -747,6 +753,7 @@ async function importModule(context: ImportContext, body: Record<string, unknown
     deferredCount: deferredCustomer ? 1 : 0,
     accepted,
     rejected,
+    ...(lessonRejectionReasons ? { lessonRejectionReasons } : {}),
     invalidBalanceCount,
     projectionBlocked,
     complete: complete && !projectionBlocked,
@@ -1523,19 +1530,28 @@ async function canonicalizeLessons(rows: FetchedRecord[], state: AlfaState, acto
   const statements = [];
   let accepted = 0;
   let rejected = 0;
+  const rejectionReasons = { missingGroup: 0, missingDate: 0, unknownGroup: 0 };
   for (const { remoteBranchId, item } of rows) {
     const lessonId = scalar(item.id);
-    const remoteGroupId = scalar(item.group_id ?? record(item.group)?.id);
+    const groupValues = Array.isArray(item.group_ids) ? item.group_ids : [item.group_id ?? record(item.group)?.id];
+    const remoteGroupIds = groupValues.map(value => scalar(record(value)?.id ?? value));
     const date = isoDate(item.date ?? item.lesson_date);
     const localBranchId = state.branchMappings[remoteBranchId] ?? "";
-    if (!lessonId || !remoteGroupId || !date || !localBranchId) { rejected += 1; continue; }
-    const groupId = await localGroupId(remoteBranchId, remoteGroupId);
-    const programId = groupPrograms.get(groupId);
-    if (!programId) { rejected += 1; continue; }
+    if (!lessonId || !localBranchId || !remoteGroupIds.length || remoteGroupIds.some(id => !id)
+      || new Set(remoteGroupIds).size !== remoteGroupIds.length) {
+      rejected += 1; rejectionReasons.missingGroup += 1; continue;
+    }
+    if (!date) { rejected += 1; rejectionReasons.missingDate += 1; continue; }
+    const destinations = await Promise.all(remoteGroupIds.map(async remoteGroupId => {
+      const groupId = await localGroupId(remoteBranchId, remoteGroupId);
+      return { remoteGroupId, groupId, programId: groupPrograms.get(groupId) };
+    }));
+    if (destinations.some(destination => !destination.programId)) { rejected += 1; rejectionReasons.unknownGroup += 1; continue; }
     const teacherRemoteId = scalar(item.teacher_id ?? record(item.teacher)?.id);
     const teacherEntityId = teacherRemoteId ? await localTeacherId(remoteBranchId, teacherRemoteId) : "";
-    const id = `LES-A-${await shortHash(`${remoteBranchId}:${lessonId}`)}`;
-    statements.push(env.DB.prepare(`INSERT INTO education_lessons
+    for (const { remoteGroupId, groupId, programId } of destinations) {
+      const id = `LES-A-${await shortHash(`${remoteBranchId}:${lessonId}${destinations.length > 1 ? `:${remoteGroupId}` : ''}`)}`;
+      statements.push(env.DB.prepare(`INSERT INTO education_lessons
       (id,group_id,program_id,scheduled_at,topic,teacher_entity_id,substitute_entity_id,room,status,homework,created_at,updated_at)
       VALUES (?,?,?,?,?,?,'',?,?,?,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)
       ON CONFLICT(id) DO UPDATE SET group_id=excluded.group_id,program_id=excluded.program_id,scheduled_at=excluded.scheduled_at,topic=excluded.topic,teacher_entity_id=excluded.teacher_entity_id,room=excluded.room,status=excluded.status,homework=excluded.homework,updated_at=CURRENT_TIMESTAMP`)
@@ -1550,12 +1566,13 @@ async function canonicalizeLessons(rows: FetchedRecord[], state: AlfaState, acto
         scalar(item.status) || "Импортировано",
         scalar(item.homework),
       ));
-    statements.push(lineageStatement("education_lessons", id, "lessons", remoteBranchId, lessonId));
+      statements.push(lineageStatement("education_lessons", id, "lessons", remoteBranchId, lessonId));
+    }
     accepted += 1;
   }
   await runBatches(statements);
   if (accepted) await env.DB.batch([auditStatement(actor, "integration.alfacrm_lessons_projected", { accepted, rejected })]);
-  return { accepted, rejected };
+  return { accepted, rejected, rejectionReasons };
 }
 
 async function canonicalizeSubscriptions(rows: FetchedRecord[], state: AlfaState) {
