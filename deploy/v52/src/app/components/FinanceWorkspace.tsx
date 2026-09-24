@@ -8,6 +8,7 @@ import { Button, Card, EmptyState, PageContainer, PageHeader, Tabs } from "./des
 import { FinanceBranchSelector, type FinanceBranchOption } from "./FinanceBranchSelector";
 import { FinanceArticlesWorkspace } from "./FinanceArticlesWorkspace";
 import { cashflowBreakdown, operationArticle, type ArticleCatalog } from "../../lib/finance-articles";
+import { operationsForPnlLine } from "../../lib/finance-pnl-drilldown";
 import "./FinanceWorkspace.ds.css";
 
 type FinanceOperation = {
@@ -239,6 +240,7 @@ export function FinanceWorkspace({ role, notify, onTasksChanged, onOpenIntegrati
   const [query, setQuery] = useState("");
   const [direction, setDirection] = useState("Все направления");
   const [previewIds, setPreviewIds] = useState<string[] | null>(null);
+  const [pnlDrilldown, setPnlDrilldown] = useState<{ period: string; branchId: string; category: string; reportClass: string } | null>(null);
   const [selected, setSelected] = useState<FinanceOperation | null>(null);
   const [selectedBank, setSelectedBank] = useState<FinanceBankOperation | null>(null);
   const [classificationOpen, setClassificationOpen] = useState(false);
@@ -400,6 +402,10 @@ export function FinanceWorkspace({ role, notify, onTasksChanged, onOpenIntegrati
         operation.bankOperationRef,
       ].some((value) => value.toLocaleLowerCase("ru").includes(normalized)));
   }, [data, direction, period, query, previewIds]);
+  const selectedPnlLine = data && pnlDrilldown && data.branch.id === pnlDrilldown.branchId && period === pnlDrilldown.period
+    ? data.pnlLines.find((line) => line.category === pnlDrilldown.category && line.reportClass === pnlDrilldown.reportClass)
+    : undefined;
+  const pnlLineOperations = selectedPnlLine && data ? operationsForPnlLine(data.operations, selectedPnlLine.operationIds, period) : [];
 
   const mobileBranchScope = <div className="ahFinanceMobileBranchScope" data-d182-marker="D182_FINANCE_MOBILE_BRANCH"><FinanceBranchSelector selectedBranch={selectedBranch} branches={branches} onChange={onBranchChange} /></div>;
 
@@ -556,7 +562,7 @@ export function FinanceWorkspace({ role, notify, onTasksChanged, onOpenIntegrati
       {tab === "pnl" ? (
         <div className="finance-two-column pnl-layout">
           <article className="finance-panel pnl-summary"><div className="finance-panel-head"><div><p>Рабочая управленческая проекция</p><h2>ОПиУ · {financePeriodLabel(period)}</h2></div><span className="projection-pill">НЕ УТВЕРЖДЁННЫЙ ФАКТ</span></div><div className="pnl-warning"><strong>Отдельный источник ОПиУ не предоставлен</strong><span>Результат рассчитан из классифицированных денежных статей ОДДС. Финансирование исключено, но начислительный метод пока не подтверждён.</span></div><div className="pnl-bridge"><div><span>Доходы</span><strong>{rubles(data.summary.revenueMinor)}</strong></div><div><span>Операционные расходы</span><strong>−{rubles(data.summary.expenseMinor)}</strong></div><div className={data.summary.resultMinor >= 0 ? "positive" : "negative"}><span>Рабочий результат</span><strong>{signedRubles(data.summary.resultMinor)}</strong></div></div></article>
-          <article className="finance-panel pnl-lines"><div className="finance-panel-head"><div><p>Расшифровка</p><h2>Статьи результата</h2></div><span>Нажмите на строку</span></div><div>{data.pnlLines.filter((line) => line.reportClass !== "Не включено в ОПиУ").map((line) => <button key={`${line.reportClass}-${line.category}`} onClick={() => { const operation = data.operations.find((item) => item.id === line.operationIds[0]); if (operation) openOperation(operation); }}><span><strong>{line.category}</strong><small>{line.reportClass} · {line.operationIds.length} операция</small></span><em className={line.reportClass === "Доходы ОПиУ" ? "income" : line.reportClass === "Расходы ОПиУ" ? "expense" : "finance"}>{line.reportClass === "Расходы ОПиУ" ? "−" : "+"}{rubles(line.amountMinor)}</em></button>)}</div></article>
+          <article className="finance-panel pnl-lines"><div className="finance-panel-head"><div><p>Расшифровка · {financePeriodLabel(period)}</p><h2>{selectedPnlLine ? selectedPnlLine.category : "Статьи результата"}</h2></div>{selectedPnlLine ? <button type="button" onClick={() => setPnlDrilldown(null)}>← Все статьи</button> : <span>Нажмите на строку</span>}</div>{selectedPnlLine ? <><div className="pnl-drilldown-summary"><strong>{pnlLineOperations.length} операций</strong><span>Итого по статье: {rubles(selectedPnlLine.amountMinor)}</span></div><div className="pnl-drilldown-rows">{pnlLineOperations.map((operation) => <button type="button" key={operation.id} onClick={() => openOperation(operation)} aria-label={`Открыть операцию ${recordLabel("Операция", operation.id)}`}><span><strong>{operation.counterpartyLabel || operation.bankDetails?.counterpartyName || recordLabel("Операция", operation.id)}</strong><small>{operation.operationDate} · {operation.managementPurpose || operation.bankDetails?.description || recordLabel("Операция", operation.id)}</small></span><em>{rubles(Math.abs(operation.amountMinor))}</em></button>)}</div>{pnlLineOperations.length !== selectedPnlLine.operationIds.length ? <p className="pnl-drilldown-warning">Часть ссылок статьи не найдена среди операций этого периода. Итог статьи не подменён видимыми строками.</p> : null}</> : <div>{data.pnlLines.filter((line) => line.reportClass !== "Не включено в ОПиУ").map((line) => <button key={`${line.reportClass}-${line.category}`} onClick={() => setPnlDrilldown({ period, branchId: data.branch.id, category: line.category, reportClass: line.reportClass })}><span><strong>{line.category}</strong><small>{line.reportClass} · {line.operationIds.length} операций</small></span><em className={line.reportClass === "Доходы ОПиУ" ? "income" : line.reportClass === "Расходы ОПиУ" ? "expense" : "finance"}>{line.reportClass === "Расходы ОПиУ" ? "−" : "+"}{rubles(line.amountMinor)}</em></button>)}</div>}</article>
         </div>
       ) : null}
 

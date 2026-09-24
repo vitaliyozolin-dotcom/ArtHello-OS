@@ -807,3 +807,10 @@
   .ahFinanceOperationComments form { grid-template-columns: 1fr; }
   .ahFinanceOperationComments form > button { justify-self: end; }
 }
+.pnl-drilldown-summary{display:flex;justify-content:space-between;gap:12px;padding:10px 16px;border-top:1px solid var(--line);color:var(--text-secondary);font-size:12px}
+.pnl-drilldown-rows{max-height:490px;overflow-y:auto;border-top:1px solid var(--line)}
+.pnl-drilldown-rows>button{width:100%;display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 16px;border:0;border-bottom:1px solid var(--line);background:#fff;text-align:left;cursor:pointer}
+.pnl-drilldown-rows>button:hover,.pnl-drilldown-rows>button:focus-visible{background:var(--surface-muted)}
+.pnl-drilldown-rows strong,.pnl-drilldown-rows small{display:block}.pnl-drilldown-rows small{margin-top:3px;color:var(--text-secondary);overflow-wrap:anywhere}.pnl-drilldown-rows em{flex:none;font-style:normal;font-weight:700}
+.pnl-drilldown-warning{margin:0;padding:12px 16px;color:#98513e;font-size:12px}
+@media(max-width:620px){.pnl-drilldown-summary{flex-direction:column}.pnl-drilldown-rows>button{align-items:flex-start}.pnl-drilldown-rows em{white-space:nowrap}}
