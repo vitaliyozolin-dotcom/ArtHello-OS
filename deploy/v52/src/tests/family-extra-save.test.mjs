@@ -89,6 +89,16 @@ async function save(f, edits) {
   return f.read();
 }
 
+test('PATCH returns the saved family row so the list can update without resetting its place', async () => {
+  const f = fixture({ sourceSystem: 'MANUAL' });
+  const response = await f.patch({ familyName: 'Исправленная семья' });
+  assert.equal(response.status, 200);
+  const payload = await response.json();
+  assert.equal(payload.family.id, 'TEST-FAMILY');
+  assert.equal(payload.family.displayName, 'Исправленная семья');
+  assert.equal(f.rows.auditEvents.at(-1).action, 'family.updated');
+});
+
 for (const sourceSystem of ['ALFACRM', 'MANUAL']) {
   test(`${sourceSystem}: existing representative and student extras survive PATCH then GET`, async () => {
     const f = fixture({ sourceSystem });
