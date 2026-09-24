@@ -154,7 +154,7 @@ ROOT = Path(__file__).resolve().parents[1]
 REPOSITORY = 'vitaliyozolin-dotcom/ArtHello-OS'
 OWNER = 'vitaliyozolin-dotcom'
 PINS = {
-    'central': ('5e2df802d5b8df70043081938392c93533c58992', None),
+    'central': ('4f745ce821a075081d09b36e6ef0ebf1ac26dcbc', None),
     'atlas': ('04a080bb247f1b5dbadfe504a59ae475bd09b6d1', '21daada019ffebb6b8d30de48f268ed3163c6c3e'),
     'school': ('5876accedbdf3758971fdc383f1e0fad8c32a158', '5802a5e6fb6d254f1f67a3776ae0c47d43a68859'),
 }
@@ -394,8 +394,8 @@ def main():
                 and old['Image'] == 'sha256:38b25e525cbcbebff5e581840138f01f5f89dd7aa521eecec0ba5b15fd1bca93', 'PREDECESSOR_INVENTORY')
     plan = runtime_plan(old, system, image, image_source, image_tree)
     if system == 'central':
-        require(old['Id'] == 'b8bec20fedcd9ea60b30cdae71b3ec8962bf4fa1baf2d7c68215029608a74df7'
-                and old['Image'] == 'sha256:f6139f79a6378f7a9e25bfabb06d71412460de95947996bbf7b3a22d101288a5',
+        require(old['Id'] == '443ee25945d269f43010dba4f40917a69ec2965ed8876834d632a2f7897d27f7'
+                and old['Image'] == 'sha256:0ce1f600d502c7ff052cc815cab493a39c4adc35f8f954d83af192a4c5f20f24',
                 'PREDECESSOR_INVENTORY')
     public_health()
     result = upgrade(old, plan, work, run_key, current_main)

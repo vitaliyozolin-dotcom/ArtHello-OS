@@ -46,6 +46,7 @@ test('scheduler authorization rejects browser credentials and invalid secrets', 
   const secret = 'a'.repeat(64);
   const request = headers => new Request('https://example.test/api/integrations/alfacrm', {method:'POST',headers});
   assert.equal(await authenticateAlfaAutosync(request({'x-arthello-alfa-autosync':secret}), secret), true);
+  assert.equal(await authenticateAlfaAutosync(new Request('https://example.test/api/settings', {method:'POST',headers:{'x-arthello-alfa-autosync':secret}}), secret), false);
   for (const headers of [{}, {'x-arthello-alfa-autosync':'b'.repeat(64)}, {'x-arthello-alfa-autosync':secret,cookie:'session=x'}, {'x-arthello-alfa-autosync':secret,origin:'https://example.test'}]) {
     assert.equal(await authenticateAlfaAutosync(request(headers), secret), false);
   }
