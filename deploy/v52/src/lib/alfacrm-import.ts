@@ -105,7 +105,8 @@ export function advanceAlfaAutosync(state: AlfaAutosync,
 
 export async function authenticateAlfaAutosync(request: Request, secret: string) {
   const provided = request.headers.get('x-arthello-alfa-autosync') ?? '';
-  if (request.method !== 'POST' || request.headers.has('cookie') || request.headers.has('origin')
+  if (request.method !== 'POST' || new URL(request.url).pathname !== '/api/integrations/alfacrm'
+    || request.headers.has('cookie') || request.headers.has('origin')
     || !/^[a-f0-9]{64}$/.test(secret) || !/^[a-f0-9]{64}$/.test(provided)) return false;
   const encoder = new TextEncoder();
   const key = await crypto.subtle.importKey('raw', encoder.encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign', 'verify']);
