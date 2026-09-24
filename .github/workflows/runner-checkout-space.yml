@@ -4,12 +4,12 @@ on:
   workflow_dispatch:
     inputs:
       operation:
-        description: Inspect, or remove only completed temporary checkouts
+        description: Inspect, remove completed checkouts, or retire two exact unused images
         type: choice
         required: true
-        options: [inspect, clean]
+        options: [inspect, clean, images]
       confirmation:
-        description: For clean type CLEAN ARTHELLO OLD CHECKOUTS
+        description: For clean type CLEAN ARTHELLO OLD CHECKOUTS; for images type RETIRE TWO UNUSED IMAGES
         type: string
         required: false
 
@@ -29,7 +29,8 @@ jobs:
       github.triggering_actor == 'vitaliyozolin-dotcom' &&
       github.run_attempt == 1 &&
       (inputs.operation == 'inspect' ||
-       (inputs.operation == 'clean' && inputs.confirmation == 'CLEAN ARTHELLO OLD CHECKOUTS'))
+       (inputs.operation == 'clean' && inputs.confirmation == 'CLEAN ARTHELLO OLD CHECKOUTS') ||
+       (inputs.operation == 'images' && inputs.confirmation == 'RETIRE TWO UNUSED IMAGES'))
     runs-on: [self-hosted, linux, x64, arthello-gateway]
     environment: production-ru
     timeout-minutes: 10
@@ -45,6 +46,55 @@ jobs:
             -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/vnd.github+json' \
             https://api.github.com/repos/vitaliyozolin-dotcom/ArtHello-OS/git/ref/heads/main | jq -er '.object.sha')"
           test "$current_main" = "$GITHUB_SHA"
+          if [ "$OPERATION" = images ]; then
+            # D226: both immutable IDs were inventoried with zero containers.
+            # No volumes, containers, logs, build cache, or other images are touched.
+            ids=(
+              sha256:b05c91cccc9c3a05a0681aae9ad3075f938b49944f88db42b564b3ab4d5a8c39
+              sha256:625d7c0332da71a7bd2c424d434500fe9dabf3ad8d851661c682ccf6ca012746
+            )
+            tags=(
+              arthello-v52-verify:6c820c0d116ebfde0f0c3bef6dbde4eec0df5cc0
+              arthello-directory-school:5876accedbdf3758971fdc383f1e0fad8c32a158
+            )
+            echo '### Space before (KiB)'
+            df -Pk -- "$GITHUB_WORKSPACE"
+            check_images() {
+              local i id tag snapshot bound
+              for i in 0 1; do
+                id="${ids[$i]}"; tag="${tags[$i]}"
+                snapshot="$(docker image inspect "$id")"
+                jq -e --arg id "$id" --arg tag "$tag" \
+                  'length == 1 and .[0].Id == $id and .[0].RepoTags == [$tag] and (.[0].RepoDigests | length == 0)' \
+                  <<<"$snapshot" >/dev/null
+                bound="$(docker image inspect "$tag" --format '{{.Id}}')"
+                test "$bound" = "$id"
+              done
+              mapfile -t containers < <(docker ps -aq --no-trunc)
+              if [ "${#containers[@]}" -gt 0 ]; then
+                docker inspect "${containers[@]}" | jq -e --arg a "${ids[0]}" --arg b "${ids[1]}" \
+                  'all(.[]; .Image != $a and .Image != $b)' >/dev/null
+              fi
+            }
+            check_images
+            test "$(docker inspect c458727c47647b9a04f414c4b1e7fbe27c1870c9e97a175832a14ceb6e8a5f7e --format '{{.State.Running}}|{{.Image}}')" = \
+              'true|sha256:ff58abd131134b252989932f667fddba6dc5b1589c425512c7d7be0724a48f3d'
+            current_main="$(curl --fail --silent --show-error --max-time 20 \
+              -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/vnd.github+json' \
+              https://api.github.com/repos/vitaliyozolin-dotcom/ArtHello-OS/git/ref/heads/main | jq -er '.object.sha')"
+            test "$current_main" = "$GITHUB_SHA"
+            check_images
+            for id in "${ids[@]}"; do docker image rm --no-prune "$id"; done
+            for id in "${ids[@]}"; do
+              if docker image inspect "$id" >/dev/null 2>&1; then exit 2; fi
+            done
+            echo '### Space after (KiB)'
+            df -Pk -- "$GITHUB_WORKSPACE"
+            available="$(df -Pk -- "$GITHUB_WORKSPACE" | awk 'NR==2 {print $4}')"
+            test "$available" -ge 5242880
+            echo 'EXACT_UNUSED_IMAGES_RETIRED=1'
+            exit 0
+          fi
           runner_root="$(realpath "$RUNNER_TEMP/../..")"
           checkout="$runner_root/_work/ArtHello-OS/ArtHello-OS"
           test "$GITHUB_WORKSPACE" = "$checkout"
