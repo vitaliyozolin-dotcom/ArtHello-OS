@@ -7,9 +7,9 @@ on:
         description: Inspect, remove completed checkouts, or retire two exact unused images
         type: choice
         required: true
-        options: [inspect, inspect-images, clean, images, images-extra]
+        options: [inspect, inspect-images, clean, images, images-extra, retire-e2e]
       confirmation:
-        description: For clean type CLEAN ARTHELLO OLD CHECKOUTS; images RETIRE TWO UNUSED IMAGES; images-extra RETIRE TWO EXTRA UNUSED IMAGES
+        description: For clean type CLEAN ARTHELLO OLD CHECKOUTS; images RETIRE TWO UNUSED IMAGES; images-extra RETIRE TWO EXTRA UNUSED IMAGES; retire-e2e RETIRE EXACT UNUSED E2E IMAGE
         type: string
         required: false
 
@@ -31,7 +31,8 @@ jobs:
       (inputs.operation == 'inspect' || inputs.operation == 'inspect-images' ||
        (inputs.operation == 'clean' && inputs.confirmation == 'CLEAN ARTHELLO OLD CHECKOUTS') ||
        (inputs.operation == 'images' && inputs.confirmation == 'RETIRE TWO UNUSED IMAGES') ||
-       (inputs.operation == 'images-extra' && inputs.confirmation == 'RETIRE TWO EXTRA UNUSED IMAGES'))
+       (inputs.operation == 'images-extra' && inputs.confirmation == 'RETIRE TWO EXTRA UNUSED IMAGES') ||
+       (inputs.operation == 'retire-e2e' && inputs.confirmation == 'RETIRE EXACT UNUSED E2E IMAGE'))
     runs-on: [self-hosted, linux, x64, arthello-gateway]
     environment: production-ru
     timeout-minutes: 10
@@ -47,6 +48,41 @@ jobs:
             -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/vnd.github+json' \
             https://api.github.com/repos/vitaliyozolin-dotcom/ArtHello-OS/git/ref/heads/main | jq -er '.object.sha')"
           test "$current_main" = "$GITHUB_SHA"
+          if [ "$OPERATION" = retire-e2e ]; then
+            # D227: the exact e2e test image was inventoried again in run 36056790516
+            # with no container. This path never touches volumes, containers,
+            # application images, caches, or any other tag.
+            id='sha256:1d736341ca55199764149f61d0a5f1333412e1571225177e90b752cd18e2356e'
+            tag='arthello-e2e:bcc36f2d5b098c55e686f69b48d389120c0bd1df'
+            check_target() {
+              local snapshot
+              snapshot="$(docker image inspect "$id")"
+              jq -e --arg id "$id" --arg tag "$tag" --arg rev 'bcc36f2d5b098c55e686f69b48d389120c0bd1df' \
+                'length == 1 and .[0].Id == $id and .[0].RepoTags == [$tag] and
+                 .[0].Config.Labels["org.opencontainers.image.revision"] == $rev' <<<"$snapshot" >/dev/null
+              test "$(docker image inspect "$tag" --format '{{.Id}}')" = "$id"
+              mapfile -t containers < <(docker ps -aq --no-trunc)
+              if [ "${#containers[@]}" -gt 0 ]; then
+                docker inspect "${containers[@]}" | jq -e --arg id "$id" 'all(.[]; .Image != $id)' >/dev/null
+              fi
+            }
+            echo '### Space before (KiB)'
+            df -Pk -- "$GITHUB_WORKSPACE"
+            check_target
+            current_main="$(curl --fail --silent --show-error --max-time 20 \
+              -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/vnd.github+json' \
+              https://api.github.com/repos/vitaliyozolin-dotcom/ArtHello-OS/git/ref/heads/main | jq -er '.object.sha')"
+            test "$current_main" = "$GITHUB_SHA"
+            check_target
+            docker image rm --no-prune "$id"
+            if docker image inspect "$id" >/dev/null 2>&1; then exit 2; fi
+            echo '### Space after (KiB)'
+            df -Pk -- "$GITHUB_WORKSPACE"
+            available="$(df -Pk -- "$GITHUB_WORKSPACE" | awk 'NR==2 {print $4}')"
+            test "$available" -ge 5242880
+            echo 'EXACT_UNUSED_E2E_IMAGE_RETIRED=1'
+            exit 0
+          fi
           if [ "$OPERATION" = inspect-images ]; then
             echo '### Space (KiB)'
             df -Pk -- "$GITHUB_WORKSPACE"
