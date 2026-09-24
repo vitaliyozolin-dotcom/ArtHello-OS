@@ -208,7 +208,8 @@ async function previewCustomerPolicy(context: ImportContext) {
     let metadata: JsonRecord; try { metadata = JSON.parse(storedRow.metadata) as JsonRecord; } catch { continue; }
     const branch = scalar(metadata.remoteBranchId);
     const source = sourceByKey.get(`${branch}:${scalar(metadata.alfaCustomerId)}`);
-    const reason = source ? 'Статус исключён из текущего списка' : 'Нет в актуальном составе филиала';
+    const reason = source?.branchIds?.includes(branch) && !customerPolicy(source.status).include
+      ? 'Статус исключён из текущего списка' : 'Нет в актуальном составе филиала';
     const previousStatus = scalar(metadata.alfaStatusName) || 'Статус не подтверждён';
     const key = JSON.stringify([branch, previousStatus, reason]);
     const entry = archiveBreakdown.get(key) ?? { branch, previousStatus, reason, count: 0 };
