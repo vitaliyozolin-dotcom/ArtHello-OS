@@ -1,4 +1,5 @@
 import { isTochkaAutosyncRequest } from './lib/tochka-autosync';
+import { authenticateAlfaAutosync } from './lib/alfacrm-import';
 // TOCHKA_AUTOMATIC_READONLY_V1
 import { env } from "cloudflare:workers";
 import { NextResponse } from "next/server";
@@ -27,6 +28,13 @@ export async function proxy(request: Request) {
 
   const schedulerSecret = (env as unknown as { TOCHKA_AUTOSYNC_SECRET?: string }).TOCHKA_AUTOSYNC_SECRET;
   if (schedulerSecret && await isTochkaAutosyncRequest(request, schedulerSecret)) {
+    return NextResponse.next({ request: { headers } });
+  }
+
+  // The local timer has no browser origin or session. Admit only its exact
+  // connector route with the same runtime-only secret verified by the handler.
+  const alfaSecret = (env as unknown as { ALFACRM_AUTOSYNC_SECRET?: string }).ALFACRM_AUTOSYNC_SECRET;
+  if (alfaSecret && await authenticateAlfaAutosync(request, alfaSecret)) {
     return NextResponse.next({ request: { headers } });
   }
 
