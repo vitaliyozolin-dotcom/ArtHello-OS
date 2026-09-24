@@ -7,7 +7,7 @@ on:
         description: Inspect, remove completed checkouts, or retire two exact unused images
         type: choice
         required: true
-        options: [inspect, inspect-images, clean, images, images-extra, retire-e2e]
+        options: [inspect, inspect-images, inspect-autosync, clean, images, images-extra, retire-e2e]
       confirmation:
         description: For clean type CLEAN ARTHELLO OLD CHECKOUTS; images RETIRE TWO UNUSED IMAGES; images-extra RETIRE TWO EXTRA UNUSED IMAGES; retire-e2e RETIRE EXACT UNUSED E2E IMAGE
         type: string
@@ -29,6 +29,7 @@ jobs:
       github.triggering_actor == 'vitaliyozolin-dotcom' &&
       github.run_attempt == 1 &&
       (inputs.operation == 'inspect' || inputs.operation == 'inspect-images' ||
+       inputs.operation == 'inspect-autosync' ||
        (inputs.operation == 'clean' && inputs.confirmation == 'CLEAN ARTHELLO OLD CHECKOUTS') ||
        (inputs.operation == 'images' && inputs.confirmation == 'RETIRE TWO UNUSED IMAGES') ||
        (inputs.operation == 'images-extra' && inputs.confirmation == 'RETIRE TWO EXTRA UNUSED IMAGES') ||
@@ -48,6 +49,32 @@ jobs:
             -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/vnd.github+json' \
             https://api.github.com/repos/vitaliyozolin-dotcom/ArtHello-OS/git/ref/heads/main | jq -er '.object.sha')"
           test "$current_main" = "$GITHUB_SHA"
+          if [ "$OPERATION" = inspect-autosync ]; then
+            # Read only the exact central runtime installed by protected release #65.
+            # Print allowlisted timer outcomes, never raw application logs or env values.
+            live_id='443ee25945d269f43010dba4f40917a69ec2965ed8876834d632a2f7897d27f7'
+            docker inspect "$live_id" | jq -e --arg id "$live_id" \
+              --arg image 'sha256:0ce1f600d502c7ff052cc815cab493a39c4adc35f8f954d83af192a4c5f20f24' \
+              --arg revision '4f745ce821a075081d09b36e6ef0ebf1ac26dcbc' \
+              'length == 1 and .[0].Id == $id and .[0].Image == $image and
+               .[0].State.Running == true and
+               .[0].Config.Labels["org.opencontainers.image.revision"] == $revision and
+               any(.[0].Config.Env[]; . == "ALFACRM_AUTOSYNC_ENABLED=1")' >/dev/null
+            docker logs --since 30m "$live_id" 2>&1 | python3 -c '
+          import collections, json, re, sys
+          allowed = re.compile(r"ALFACRM_AUTOSYNC_TICK=(DISABLED|NOT_DUE|PENDING|COMPLETE|RETRY|PAUSED|FAILED|INVALID_RESPONSE|HTTP_[0-9]{3})")
+          counts = collections.Counter()
+          for line in sys.stdin:
+              match = allowed.fullmatch(line.strip())
+              if match:
+                  counts[match.group(1)] += 1
+              elif line.strip() == "alfacrm.autosync_tick_failed":
+                  counts["HANDLER_FAILED"] += 1
+          print("ALFA_AUTOSYNC_TIMER_OUTCOMES=" + json.dumps(dict(sorted(counts.items())), sort_keys=True))
+          '
+            echo 'ALFA_AUTOSYNC_RUNTIME_INSPECTED=1'
+            exit 0
+          fi
           if [ "$OPERATION" = retire-e2e ]; then
             # D227: the exact e2e test image was inventoried again in run 36056790516
             # with no container. This path never touches volumes, containers,
