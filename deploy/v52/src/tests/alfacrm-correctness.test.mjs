@@ -35,7 +35,7 @@ let source = stripTypeScriptTypes(readFileSync(resolve('app/api/integrations/alf
     assert.ok(adapters[name], `Unexpected dependency ${name}: update the explicit fixture adapter`);
     return `from "${adapters[name]}"`;
   });
-source += '\nexport {defaultState,persistState,readState,ensureAlfaTables,upsertRawRecords,canonicalizeFamilies,canonicalizeStaff,canonicalizeGroups,canonicalizeFinance,importModule,previewModule,previewSignatureFor,normalizeEndpoint,alfaFetch,fetchPaged};\n//# sourceURL=alfacrm-correctness-fixture.mjs';
+source += '\nexport {defaultState,persistState,readState,ensureAlfaTables,upsertRawRecords,canonicalizeFamilies,canonicalizeStaff,canonicalizeGroups,canonicalizeLessons,canonicalizeFinance,importModule,previewModule,previewSignatureFor,normalizeEndpoint,alfaFetch,fetchPaged};\n//# sourceURL=alfacrm-correctness-fixture.mjs';
 const route = await import(dataModule(source));
 const branches = [{ id: 'BR-SCHOOL', name: 'School' }, { id: 'BR-NURSERY', name: 'Nursery' }];
 const session = { endpoint: 'https://fixture.s20.online', token: 'synthetic-token-for-tests', email: 'fixture@example.test', apiKey: 'synthetic-key', appKey: '' };
@@ -1120,4 +1120,33 @@ test('a confirmed root survives a separately imported third-branch copy with a s
  await importSnapshot('staff',{'1':[teacher],'2':[teacher],'3':[teacher]},{mappings:{'1':'BR-SCHOOL','2':'BR-NURSERY','3':'BR-THIRD'}});
  assert.equal(sql.prepare("SELECT id FROM entities WHERE entity_type='Сотрудник' AND status='Активна'").get().id,root);
  assert.equal(sql.prepare("SELECT count(*) n FROM entities WHERE entity_type='Сотрудник' AND status='Активна'").get().n,1);
+});
+
+test('lesson rejection reports bounded aggregate reasons without source details',async t=>{
+ const {state}=await setup(t);
+ const result=await route.canonicalizeLessons([
+  {remoteBranchId:'1',item:{id:1,group_id:5,date:'2026-09-01'}},
+  {remoteBranchId:'1',item:{id:2,group_id:5}},
+  {remoteBranchId:'1',item:{id:3,date:'2026-09-01'}},
+ ],state,'TEST');
+ assert.deepEqual(result,{accepted:0,rejected:3,rejectionReasons:{missingGroup:1,missingDate:1,unknownGroup:1}});
+ assert.doesNotMatch(JSON.stringify(result),/2026-09-01|"id"/);
+});
+
+test('one Alfa lesson with group_ids projects to each verified current group',async t=>{
+ const {sql,state}=await setup(t);const {createHash}=await import('node:crypto');
+ for(const column of ['group_id','program_id','scheduled_at','topic','room','status','homework','created_at','updated_at'])
+  sql.exec(`ALTER TABLE education_lessons ADD COLUMN ${column} TEXT`);
+ sql.exec("INSERT INTO education_programs(id,title) VALUES('P1','Program')");
+ for(const remoteId of [5,6]){
+  const id=`GRP-A-${createHash('sha256').update(`1:${remoteId}`).digest('hex').slice(0,16).toUpperCase()}`;
+  sql.prepare("INSERT INTO education_groups(id,name,unit_entity_id,program_id,status) VALUES(?,?,?,'P1','Активна')").run(id,`Group ${remoteId}`,'BR-SCHOOL');
+ }
+ sql.prepare("INSERT INTO alfacrm_import_batches(id,module,scope,status,created_at) VALUES('B1','lessons','{}','projecting','2026-09-01')").run();
+ const rows=[{remoteBranchId:'1',item:{id:7,group_ids:[5,6],date:'2026-09-01',time_from:'09:00'}}];
+ await route.upsertRawRecords('lessons',rows,'B1');
+ const result=await route.canonicalizeLessons(rows,state,'TEST');
+ assert.equal(result.accepted,1);
+ assert.equal(result.rejected,0);
+ assert.equal(sql.prepare('SELECT count(*) AS n FROM education_lessons').get().n,2);
 });
