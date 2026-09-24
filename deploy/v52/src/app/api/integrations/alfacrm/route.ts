@@ -200,8 +200,24 @@ async function previewCustomerPolicy(context: ImportContext) {
   });
   const comparison = rows.every(row => Array.isArray(row.branchIds)) && report.duplicates === 0
     ? compareCustomerProjections(rows, existing, selected, { complete: true }) : null;
+  const sourceByKey = new Map(rows.map(row => [`${row.branch}:${row.id}`, row]));
+  const archiveBreakdown = new Map<string, { branch: string; previousStatus: string; reason: string; count: number }>();
+  for (const id of comparison?.archiveIds ?? []) {
+    const storedRow = (stored.results ?? []).find(row => row.id === id);
+    if (!storedRow) continue;
+    let metadata: JsonRecord; try { metadata = JSON.parse(storedRow.metadata) as JsonRecord; } catch { continue; }
+    const branch = scalar(metadata.remoteBranchId);
+    const source = sourceByKey.get(`${branch}:${scalar(metadata.alfaCustomerId)}`);
+    const reason = source?.branchIds?.includes(branch) && !customerPolicy(source.status).include
+      ? 'Статус исключён из текущего списка' : 'Нет в актуальном составе филиала';
+    const previousStatus = scalar(metadata.alfaStatusName) || 'Статус не подтверждён';
+    const key = JSON.stringify([branch, previousStatus, reason]);
+    const entry = archiveBreakdown.get(key) ?? { branch, previousStatus, reason, count: 0 };
+    entry.count += 1;
+    archiveBreakdown.set(key, entry);
+  }
   return privateJson({ customerPreview: { ...report, excludedLifecycle,
-    comparison,
+    comparison, archiveBreakdown: [...archiveBreakdown.values()].sort((a, b) => b.count - a.count),
     observedAt: new Date().toISOString(),
     branchNames: Object.fromEntries(state.remoteBranches.map(branch => [branch.id, branch.name])),
     // Source statuses alone never authorize replacing the current OS graph.
@@ -520,6 +536,9 @@ async function previewModule(context: ImportContext, body: Record<string, unknow
   } else {
     const rows = await fetchModuleRecords(session, module, selectedBranches, params);
     previewDeferredCustomer = await missingStatusDeferral(rows, params.deferMissingStatusBranch);
+    if (module === 'families' && state.modules.families.deferredCustomer &&
+      previewDeferredCustomer?.key !== state.modules.families.deferredCustomer.key)
+      throw new AlfaApiError('Ранее исключённая запись без статуса изменилась. Новая сверка обязательна; карточки сохранены.', 409);
     count = currentProjectionRows(module, rows, previewDeferredCustomer?.key).length;
   }
   const previewToken = crypto.randomUUID();
@@ -632,6 +651,9 @@ async function importModule(context: ImportContext, body: Record<string, unknown
   }
 
   const deferredCustomer = await missingStatusDeferral(rows, params.deferMissingStatusBranch);
+  if (module === 'families' && state.modules.families.deferredCustomer &&
+    deferredCustomer?.key !== state.modules.families.deferredCustomer.key)
+    throw new AlfaApiError('Ранее исключённая запись без статуса изменилась. Новая сверка обязательна; карточки сохранены.', 409);
   if (JSON.stringify(deferredCustomer) !== JSON.stringify(storedModule.previewDeferredCustomer))
     throw new AlfaApiError('Исключённая запись изменилась после предпросмотра. Повторите проверку.', 409);
   const projectionRows = currentProjectionRows(module, rows, deferredCustomer?.key);

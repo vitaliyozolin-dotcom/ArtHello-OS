@@ -208,6 +208,12 @@ test('owner defers one exact missing-status customer while reconciling the other
   const membership = sql.prepare('SELECT * FROM education_students').all();
   const current = sql.prepare("SELECT * FROM alfacrm_current_records WHERE record_id='1'").all();
   mockRecords({ '2/customer/index': [{ id: 1, name: 'Deferred pupil', study_status_id: null }, { id: 3, name: 'Current pupil' }] });
+  const reportResponse = await post({ action:'previewCustomers' });
+  assert.equal(reportResponse.status, 200);
+  const report = (await reportResponse.json()).customerPreview;
+  assert.equal(report.comparison.archiveIds.length, 1);
+  assert.deepEqual(report.archiveBreakdown.map(({ previousStatus, reason, count }) => ({ previousStatus, reason, count })),
+    [{ previousStatus:'Активен', reason:'Нет в актуальном составе филиала', count:1 }]);
   const preview = await post({ action:'previewModule', module:'families', deferMissingStatusBranch:'2' });
   assert.equal(preview.status, 200, await preview.clone().text());
   const p = await preview.json();
@@ -222,6 +228,12 @@ test('owner defers one exact missing-status customer while reconciling the other
   assert.deepEqual(sql.prepare('SELECT * FROM education_students').all(), membership);
   assert.equal(sql.prepare("SELECT status FROM entities WHERE entity_type='Семья' AND json_extract(metadata,'$.alfaCustomerId')='2'").get().status, 'Архив');
   assert.equal(sql.prepare("SELECT COUNT(*) n FROM entities WHERE json_extract(metadata,'$.alfaCustomerId')='3'").get().n, 3);
+  const repeatPreview = await post({ action:'previewModule', module:'families', deferMissingStatusBranch:'2' });
+  assert.equal(repeatPreview.status, 200, await repeatPreview.clone().text());
+  const repeat = await repeatPreview.json();
+  assert.equal((await post({ action:'importModule', module:'families', deferMissingStatusBranch:'2', previewToken:repeat.previewToken })).status, 200);
+  mockRecords({ '2/customer/index': [{ id: 4, name: 'Different unknown pupil', study_status_id: null }, { id: 3, name: 'Current pupil' }] });
+  assert.equal((await post({ action:'previewModule', module:'families', deferMissingStatusBranch:'2' })).status, 409);
 });
 
 test('deferred customer identity and payload are bound to the owner preview', async t => {
