@@ -7,9 +7,9 @@ on:
         description: Inspect, remove completed checkouts, or retire two exact unused images
         type: choice
         required: true
-        options: [inspect, clean, images]
+        options: [inspect, clean, images, images-extra]
       confirmation:
-        description: For clean type CLEAN ARTHELLO OLD CHECKOUTS; for images type RETIRE TWO UNUSED IMAGES
+        description: For clean type CLEAN ARTHELLO OLD CHECKOUTS; images RETIRE TWO UNUSED IMAGES; images-extra RETIRE TWO EXTRA UNUSED IMAGES
         type: string
         required: false
 
@@ -30,7 +30,8 @@ jobs:
       github.run_attempt == 1 &&
       (inputs.operation == 'inspect' ||
        (inputs.operation == 'clean' && inputs.confirmation == 'CLEAN ARTHELLO OLD CHECKOUTS') ||
-       (inputs.operation == 'images' && inputs.confirmation == 'RETIRE TWO UNUSED IMAGES'))
+       (inputs.operation == 'images' && inputs.confirmation == 'RETIRE TWO UNUSED IMAGES') ||
+       (inputs.operation == 'images-extra' && inputs.confirmation == 'RETIRE TWO EXTRA UNUSED IMAGES'))
     runs-on: [self-hosted, linux, x64, arthello-gateway]
     environment: production-ru
     timeout-minutes: 10
@@ -46,7 +47,7 @@ jobs:
             -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/vnd.github+json' \
             https://api.github.com/repos/vitaliyozolin-dotcom/ArtHello-OS/git/ref/heads/main | jq -er '.object.sha')"
           test "$current_main" = "$GITHUB_SHA"
-          if [ "$OPERATION" = images ]; then
+          if [ "$OPERATION" = images ] || [ "$OPERATION" = images-extra ]; then
             # D226: both immutable IDs were inventoried with zero containers.
             # No volumes, containers, logs, build cache, or other images are touched.
             ids=(
@@ -57,6 +58,16 @@ jobs:
               arthello-v52-verify:6c820c0d116ebfde0f0c3bef6dbde4eec0df5cc0
               arthello-directory-school:5876accedbdf3758971fdc383f1e0fad8c32a158
             )
+            if [ "$OPERATION" = images-extra ]; then
+              ids=(
+                sha256:910a95f4a55ba33545177f404409401da57c30ae6822198ab8bf60d0e3730eeb
+                sha256:cb656f5e70f504f14cbcdc2aa9e70d343d07604e9c59db1f08085f9b42f8b8d8
+              )
+              tags=(
+                arthello-v52-verify:1c919896d974430295637ba9acaaafd4a6aa3d3d
+                arthello-directory-school:5802a5e6fb6d254f1f67a3776ae0c47d43a68859
+              )
+            fi
             echo '### Space before (KiB)'
             df -Pk -- "$GITHUB_WORKSPACE"
             check_images() {
