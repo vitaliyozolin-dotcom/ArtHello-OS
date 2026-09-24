@@ -7,7 +7,7 @@ on:
         description: Inspect, remove completed checkouts, or retire two exact unused images
         type: choice
         required: true
-        options: [inspect, clean, images, images-extra]
+        options: [inspect, inspect-images, clean, images, images-extra]
       confirmation:
         description: For clean type CLEAN ARTHELLO OLD CHECKOUTS; images RETIRE TWO UNUSED IMAGES; images-extra RETIRE TWO EXTRA UNUSED IMAGES
         type: string
@@ -28,7 +28,7 @@ jobs:
       github.actor == 'vitaliyozolin-dotcom' &&
       github.triggering_actor == 'vitaliyozolin-dotcom' &&
       github.run_attempt == 1 &&
-      (inputs.operation == 'inspect' ||
+      (inputs.operation == 'inspect' || inputs.operation == 'inspect-images' ||
        (inputs.operation == 'clean' && inputs.confirmation == 'CLEAN ARTHELLO OLD CHECKOUTS') ||
        (inputs.operation == 'images' && inputs.confirmation == 'RETIRE TWO UNUSED IMAGES') ||
        (inputs.operation == 'images-extra' && inputs.confirmation == 'RETIRE TWO EXTRA UNUSED IMAGES'))
@@ -47,6 +47,25 @@ jobs:
             -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/vnd.github+json' \
             https://api.github.com/repos/vitaliyozolin-dotcom/ArtHello-OS/git/ref/heads/main | jq -er '.object.sha')"
           test "$current_main" = "$GITHUB_SHA"
+          if [ "$OPERATION" = inspect-images ]; then
+            echo '### Space (KiB)'
+            df -Pk -- "$GITHUB_WORKSPACE"
+            echo '### Exact local image inventory (bytes, tags, revision, container count)'
+            mapfile -t image_ids < <(docker image ls -aq --no-trunc | sort -u)
+            mapfile -t containers < <(docker ps -aq --no-trunc)
+            consumers='[]'
+            if [ "${#containers[@]}" -gt 0 ]; then
+              consumers="$(docker inspect "${containers[@]}" | jq '[.[].Image]')"
+            fi
+            if [ "${#image_ids[@]}" -gt 0 ]; then
+              docker image inspect "${image_ids[@]}" | jq -r --argjson consumers "$consumers" \
+                '.[] | . as $image | [.Id, (.Size|tostring), ((.RepoTags // [])|join(",")),
+                  (.Config.Labels["org.opencontainers.image.revision"] // ""),
+                  ([ $consumers[] | select(. == $image.Id) ] | length | tostring)] | @tsv'
+            fi
+            echo 'RUNNER_IMAGES_INSPECTED=1'
+            exit 0
+          fi
           if [ "$OPERATION" = images ] || [ "$OPERATION" = images-extra ]; then
             # D226: both immutable IDs were inventoried with zero containers.
             # No volumes, containers, logs, build cache, or other images are touched.
