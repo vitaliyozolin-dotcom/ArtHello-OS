@@ -63,9 +63,9 @@ jobs:
           skipped_root=0
           skipped_origin=0
           skipped_status=0
-          for path in "$checkout"/preflight-* "$checkout"/alfa-release-*; do
+          for path in "$checkout"/preflight-* "$checkout"/alfa-release-* "$checkout"/alfa-audit-* "$checkout"/alfa-sync-*; do
             name="${path##*/}"
-            [[ "$name" =~ ^(preflight|alfa-release)-([0-9]+)-1$ ]] || continue
+            [[ "$name" =~ ^(preflight|alfa-release|alfa-audit|alfa-sync)-([0-9]+)-1$ ]] || continue
             test "${BASH_REMATCH[2]}" -lt "$GITHUB_RUN_ID" || continue
             if [ ! -d "$path" ] || [ -L "$path" ] || [ "$(realpath -e "$path")" != "$path" ] ||
                [ ! -d "$path/.git" ] || [ -L "$path/.git" ]; then
@@ -109,8 +109,8 @@ jobs:
             exit 0
           fi
           test "$OPERATION" = clean
-          test "${#candidates[@]}" -ge 20
-          test "$bytes" -ge 1600000000
+          test "${#candidates[@]}" -ge 15
+          test "$bytes" -ge 800000000
           mapfile -t containers < <(docker ps -aq --no-trunc)
           if [ "${#containers[@]}" -gt 0 ]; then
             mounts="$(docker inspect "${containers[@]}" | jq -r '[.[] | .Mounts[]? | .Source] | .[]')"
