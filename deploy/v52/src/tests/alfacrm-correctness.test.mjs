@@ -255,6 +255,20 @@ test('deferred customer identity and payload are bound to the owner preview', as
   assert.equal((await post({ action:'previewModule', ...body })).status, 409);
 });
 
+test('owner can defer a new missing-status customer without an existing card', async t => {
+  const { sql } = await setup(t);
+  mockRecords({ '2/customer/index': [
+    { id: 1, name:'New unknown pupil', study_status_id:null },
+    { id: 2, name:'Current pupil' },
+  ] });
+  const preview = await post({ action:'previewModule', module:'families', deferMissingStatusBranch:'2' });
+  assert.equal(preview.status, 200, await preview.clone().text());
+  const result = await post({ action:'importModule', module:'families', deferMissingStatusBranch:'2', previewToken:(await preview.json()).previewToken });
+  assert.equal(result.status, 200, await result.clone().text());
+  assert.equal(sql.prepare("SELECT COUNT(*) n FROM entities WHERE json_extract(metadata,'$.alfaCustomerId')='1'").get().n, 0);
+  assert.equal(sql.prepare("SELECT COUNT(*) n FROM entities WHERE json_extract(metadata,'$.alfaCustomerId')='2'").get().n, 3);
+});
+
 test('registration creates one linked lead, never an enrolled pupil, across repeat imports', async t => {
   const { sql } = await setup(t);
   mockRecords({ '1/study-status/index': [{ id: 10, name: 'Запись' }],
@@ -713,6 +727,43 @@ test('autosync uses real import, persists cursor and updates existing identities
   assert.equal(sql.prepare("SELECT count(*) AS n FROM entities WHERE entity_type='Сотрудник'").get().n, 1);
   assert.equal(sql.prepare("SELECT display_name FROM entities WHERE entity_type='Сотрудник'").get().display_name, name);
   assert.ok((await route.readState()).autosync.lastSuccessAt > 0);
+});
+
+test('autosync reuses only the exact owner-approved missing-status customer', async t => {
+  const { state, sql } = await setup(t);
+  state.branchMappings = { '2': 'BR-NURSERY' };
+  await route.persistState(state);
+  await importSnapshot('families', { '2': [{ id: 1, name: 'Deferred pupil' }] });
+  const records = name => ({ '2/customer/index': [
+    { id: 1, name, study_status_id: null },
+    { id: 2, name: 'Current pupil' },
+  ] });
+  mockRecords(records('Deferred pupil'));
+  const preview = await post({ action:'previewModule', module:'families', deferMissingStatusBranch:'2' });
+  assert.equal(preview.status, 200, await preview.clone().text());
+  const token = (await preview.json()).previewToken;
+  const imported = await route.importModule(actor(), { module:'families', deferMissingStatusBranch:'2', previewToken:token });
+  assert.equal(imported.status, 200, await imported.clone().text());
+  const approved = (await route.readState()).modules.families.deferredCustomer;
+  assert.ok(approved?.hash);
+  harness.env.ALFACRM_AUTOSYNC_SECRET = 'f'.repeat(64);
+  assert.equal((await post({ action:'setAutosync', enabled:true, modules:['families'] })).status, 200);
+  const tick = () => route.POST(new Request('https://arthello.example.test/api/integrations/alfacrm', {
+    method:'POST', headers:{'x-arthello-alfa-autosync':'f'.repeat(64)}, body:'{}',
+  }));
+  const due = async () => { const s=await route.readState(); s.autosync.nextAt=0; await route.persistState(s); };
+  harness.actor = null;
+  await due();
+  assert.equal((await (await tick()).json()).outcome, 'pending');
+  await due();
+  assert.equal((await (await tick()).json()).outcome, 'complete');
+  assert.deepEqual((await route.readState()).modules.families.deferredCustomer, approved);
+  const before = sql.prepare('SELECT * FROM entities ORDER BY id').all();
+  mockRecords(records('Changed deferred pupil'));
+  await due();
+  assert.equal((await (await tick()).json()).outcome, 'paused');
+  assert.equal((await route.readState()).autosync.enabled, false);
+  assert.deepEqual(sql.prepare('SELECT * FROM entities ORDER BY id').all(), before);
 });
 
 test('autosync rejects non-owner configuration, foreign headers, unimported modules and changed branch scope', async t => {

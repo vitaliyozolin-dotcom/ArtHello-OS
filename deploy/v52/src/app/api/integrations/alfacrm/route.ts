@@ -338,9 +338,12 @@ async function runAlfaAutosyncTick() {
       response = privateJson({ error: 'Источник или филиалы изменились. Повторите сверку.' }, 409);
     } else {
       const context: ImportContext = { scheduler: true, actor: 'SYSTEM:ALFACRM_AUTOSYNC' };
+      const approved = module === 'families' ? state.modules.families.deferredCustomer : undefined;
+      const deferMissingStatusBranch = approved?.key.split(':')[0];
+      const params = { module, ...(deferMissingStatusBranch ? { deferMissingStatusBranch } : {}) };
       response = schedule.phase === 'preview'
-        ? await previewModule(context, { module })
-        : await importModule(context, { module, previewToken: state.modules[module].previewToken });
+        ? await previewModule(context, params)
+        : await importModule(context, { ...params, previewToken: state.modules[module].previewToken });
     }
   } catch (error) {
     response = privateJson({}, error instanceof AlfaApiError ? error.status : 503);
@@ -522,7 +525,7 @@ async function previewModule(context: ImportContext, body: Record<string, unknow
   if (!selectedBranches.length) return privateJson({ error: "Сначала сопоставьте филиалы" }, 409);
   await assertMappedBranchAccess(context, state);
   const params = moduleParams(module, body);
-  assertDeferralOwner(context, params.deferMissingStatusBranch);
+  assertDeferralOwner(context, params.deferMissingStatusBranch, state.modules.families.deferredCustomer);
   const session = await storedSession(state);
   let count = 0;
   let countUnit = "записей";
@@ -536,6 +539,7 @@ async function previewModule(context: ImportContext, body: Record<string, unknow
   } else {
     const rows = await fetchModuleRecords(session, module, selectedBranches, params);
     previewDeferredCustomer = await missingStatusDeferral(rows, params.deferMissingStatusBranch);
+    assertSchedulerDeferral(context, module, state.modules.families.deferredCustomer, previewDeferredCustomer);
     if (module === 'families' && state.modules.families.deferredCustomer &&
       previewDeferredCustomer?.key !== state.modules.families.deferredCustomer.key)
       throw new AlfaApiError('Ранее исключённая запись без статуса изменилась. Новая сверка обязательна; карточки сохранены.', 409);
@@ -592,7 +596,7 @@ async function importModule(context: ImportContext, body: Record<string, unknown
   if (!selectedBranches.length) return privateJson({ error: "Сначала сопоставьте филиалы" }, 409);
   await assertMappedBranchAccess(context, state);
   const params = moduleParams(module, body);
-  assertDeferralOwner(context, params.deferMissingStatusBranch);
+  assertDeferralOwner(context, params.deferMissingStatusBranch, state.modules.families.deferredCustomer);
   if (!(await legacyMigrationEvidence(state)).complete) return privateJson({ error: "Обнаружен прежний формат AlfaCRM без истории наблюдений. Сначала требуется проверенный перенос источников; существующие записи сохранены." }, 409);
   const storedModule = state.modules[module];
   const previewToken = clean(body.previewToken, 80);
@@ -651,6 +655,7 @@ async function importModule(context: ImportContext, body: Record<string, unknown
   }
 
   const deferredCustomer = await missingStatusDeferral(rows, params.deferMissingStatusBranch);
+  assertSchedulerDeferral(context, module, state.modules.families.deferredCustomer, deferredCustomer);
   if (module === 'families' && state.modules.families.deferredCustomer &&
     deferredCustomer?.key !== state.modules.families.deferredCustomer.key)
     throw new AlfaApiError('Ранее исключённая запись без статуса изменилась. Новая сверка обязательна; карточки сохранены.', 409);
@@ -849,9 +854,16 @@ async function fetchModuleRecords(session: AlfaSession, module: ModuleKey, branc
   return rows;
 }
 
-function assertDeferralOwner(context: ImportContext, branch: string | undefined) {
-  if (branch && ('scheduler' in context || !canonicalOwner(context)))
+function assertDeferralOwner(context: ImportContext, branch: string | undefined, approved?: ModuleState['deferredCustomer']) {
+  if (branch && ('scheduler' in context ? approved?.key.split(':')[0] !== branch : !canonicalOwner(context)))
     throw new AlfaApiError('Исключение записи подтверждает только собственник', 403);
+}
+
+function assertSchedulerDeferral(context: ImportContext, module: ModuleKey,
+  approved?: ModuleState['deferredCustomer'], observed?: ModuleState['deferredCustomer']) {
+  if ('scheduler' in context && module === 'families' &&
+    (approved?.key !== observed?.key || approved?.hash !== observed?.hash))
+    throw new AlfaApiError('Исключённая запись AlfaCRM изменилась. Автообновление остановлено до проверки собственником; карточки сохранены.', 409);
 }
 
 async function missingStatusDeferral(rows: FetchedRecord[], branch?: string): Promise<ModuleState['deferredCustomer']> {
@@ -1461,7 +1473,9 @@ async function canonicalizeGroups(rows: FetchedRecord[], state: AlfaState, local
 
 async function syncMembershipsFromFamilyRaw(state: AlfaState, actor: string, deferredKey = state.modules.families.deferredCustomer?.key ?? '') {
   const identities = await readIdentityIndex(env.DB);
-  const deferredChild = deferredKey ? identities.canonical(`CHD-A-${await shortHash(deferredKey)}`) : '';
+  const deferredSourceChild = deferredKey ? `CHD-A-${await shortHash(deferredKey)}` : '';
+  const deferredChild = deferredSourceChild && identities.cards.some(card => card.id === deferredSourceChild)
+    ? identities.canonical(deferredSourceChild) : '';
   const existing = await env.DB.prepare("SELECT s.id,s.child_entity_id,g.unit_entity_id AS branch FROM education_students s JOIN education_groups g ON g.id=s.group_id WHERE s.id LIKE 'STU-A-%'")
     .all<{ id: string; child_entity_id: string; branch: string }>();
   const selected = new Set(Object.values(state.branchMappings));
