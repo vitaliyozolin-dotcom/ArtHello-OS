@@ -81,6 +81,22 @@ jobs:
                 console.log("SNAPSHOT_CAPACITY="+JSON.stringify({sourceBytes:source.bytes,sourceFiles:source.count,
                   partialBackupBytes:partial.bytes,partialBackupFiles:partial.count,freeBytes:free,
                   requiredBytes:required,capacitySatisfied:free>=required}));
+                const {DatabaseSync}=require("node:sqlite");
+                function databases(at){return fs.readdirSync(at).flatMap(name=>{const p=path.join(at,name), s=fs.lstatSync(p);
+                  return s.isDirectory()?databases(p):s.isFile()&&name.endsWith(".sqlite")?[p]:[]})}
+                const states=[];
+                for(const file of databases("/snapshot/raw")){
+                  let db;
+                  try {db=new DatabaseSync(file,{readOnly:true});
+                    const tables=new Set(db.prepare("select name from sqlite_master where type=\x27table\x27").all().map(r=>r.name));
+                    if(!tables.has("system_runtime_state")||!tables.has("alfacrm_import_records"))continue;
+                    const row=db.prepare("select state_value from system_runtime_state where state_key=\x27alfacrm_connector:v1\x27").get();
+                    const state=row?JSON.parse(row.state_value):null;
+                    states.push({readable:true,connected:state?.connected===true,autosyncEnabled:state?.autosync?.enabled===true});
+                  }catch{states.push({readable:false})}finally{db?.close()}
+                }
+                console.log("SNAPSHOT_CONNECTOR_FLAGS="+JSON.stringify({databaseCount:databases("/snapshot/raw").length,
+                  candidateCount:states.length,states}));
               '
             echo 'SNAPSHOT_INSPECTED_READ_ONLY=1'
             exit 0
