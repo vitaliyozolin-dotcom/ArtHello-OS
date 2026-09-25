@@ -30,6 +30,12 @@ def runtime():
 
 
 class ReleaseTests(unittest.TestCase):
+    def test_central_predecessor_is_the_successful_d194_receipt(self):
+        self.assertEqual(release.PINS['central'][0], 'd83da0ce8311a4b60832031a217b91c7dd6bb1c8')
+        source = Path(release.__file__).read_text()
+        self.assertIn('66cc912f6088bc1b929d23ee07fc906b94e82fdd2e747ce6419fb7b2fe3a7b91', source)
+        self.assertIn('sha256:70fc84b541c2bffebd8d3130544d98158d25ced0c788890511b7d96a39c50216', source)
+
     def test_preserves_bank_configuration_and_storage(self):
         old = runtime()
         plan = release.runtime_plan(old, 'central', 'sha256:' + 'e' * 64, 'f' * 40, '9' * 40)
