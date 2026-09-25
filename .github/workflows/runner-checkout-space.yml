@@ -7,7 +7,7 @@ on:
         description: Inspect, remove completed checkouts, or retire two exact unused images
         type: choice
         required: true
-        options: [inspect, inspect-images, inspect-autosync, clean, images, images-extra, retire-e2e]
+        options: [inspect, inspect-images, inspect-autosync, inspect-snapshot, clean, images, images-extra, retire-e2e]
       confirmation:
         description: For clean type CLEAN ARTHELLO OLD CHECKOUTS; images RETIRE TWO UNUSED IMAGES; images-extra RETIRE TWO EXTRA UNUSED IMAGES; retire-e2e RETIRE EXACT UNUSED E2E IMAGE
         type: string
@@ -28,7 +28,7 @@ jobs:
       github.actor == 'vitaliyozolin-dotcom' &&
       github.triggering_actor == 'vitaliyozolin-dotcom' &&
       github.run_attempt == 1 &&
-      (inputs.operation == 'inspect' || inputs.operation == 'inspect-images' ||
+      (inputs.operation == 'inspect' || inputs.operation == 'inspect-images' || inputs.operation == 'inspect-snapshot' ||
        inputs.operation == 'inspect-autosync' ||
        (inputs.operation == 'clean' && inputs.confirmation == 'CLEAN ARTHELLO OLD CHECKOUTS') ||
        (inputs.operation == 'images' && inputs.confirmation == 'RETIRE TWO UNUSED IMAGES') ||
@@ -49,6 +49,42 @@ jobs:
             -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/vnd.github+json' \
             https://api.github.com/repos/vitaliyozolin-dotcom/ArtHello-OS/git/ref/heads/main | jq -er '.object.sha')"
           test "$current_main" = "$GITHUB_SHA"
+          if [ "$OPERATION" = inspect-snapshot ]; then
+            # Read-only capacity diagnosis after D194 run 36120078514. No database content is printed.
+            live_id='66cc912f6088bc1b929d23ee07fc906b94e82fdd2e747ce6419fb7b2fe3a7b91'
+            image='sha256:70fc84b541c2bffebd8d3130544d98158d25ced0c788890511b7d96a39c50216'
+            live="$(docker inspect "$live_id")"
+            jq -e --arg id "$live_id" --arg image "$image" \
+              'length == 1 and .[0].Id == $id and .[0].Image == $image and .[0].State.Running == true and
+               .[0].Config.Labels["org.opencontainers.image.revision"] == "d83da0ce8311a4b60832031a217b91c7dd6bb1c8" and
+               ([.[0].Mounts[] | select(.Destination == "/data" and .Type == "volume" and .RW == true)] | length) == 1' \
+              <<<"$live" >/dev/null
+            source_volume="$(jq -er '.[0].Mounts[] | select(.Destination == "/data" and .Type == "volume" and .RW == true) | .Name' <<<"$live")"
+            backup_volume='arthello-d194-central-36120078514-1'
+            docker volume inspect "$source_volume" "$backup_volume" | jq -e --arg backup "$backup_volume" \
+              'length == 2 and .[1].Name == $backup and .[1].Labels["arthello.scope"] == "production-backup"' >/dev/null
+            echo '### Root and mounted block devices (bytes)'
+            df -Pk -- "$GITHUB_WORKSPACE"
+            lsblk -b -o NAME,SIZE,FSTYPE,MOUNTPOINTS
+            docker run --rm --network none --read-only --cap-drop ALL --security-opt no-new-privileges:true \
+              --pids-limit 32 --memory 256m \
+              --mount "type=volume,src=$source_volume,dst=/source,readonly,volume-nocopy" \
+              --mount "type=volume,src=$backup_volume,dst=/snapshot,readonly,volume-nocopy" \
+              --entrypoint node "$image" -e '
+                const fs=require("node:fs"), path=require("node:path");
+                function total(root){let bytes=0, count=0; function walk(at){for(const name of fs.readdirSync(at)){
+                  const item=path.join(at,name), stat=fs.lstatSync(item);
+                  if(stat.isDirectory()) walk(item); else if(stat.isFile()){bytes+=stat.size;count++} else throw Error("unsupported source entry")
+                }} walk(root); return {bytes,count}}
+                const source=total("/source"), partial=total("/snapshot"), stat=fs.statfsSync("/snapshot");
+                const free=stat.bavail*stat.bsize, required=source.bytes*3+512*1024*1024;
+                console.log("SNAPSHOT_CAPACITY="+JSON.stringify({sourceBytes:source.bytes,sourceFiles:source.count,
+                  partialBackupBytes:partial.bytes,partialBackupFiles:partial.count,freeBytes:free,
+                  requiredBytes:required,capacitySatisfied:free>=required}));
+              '
+            echo 'SNAPSHOT_INSPECTED_READ_ONLY=1'
+            exit 0
+          fi
           if [ "$OPERATION" = inspect-autosync ]; then
             # Read only the exact central runtime installed by protected release #65.
             # Print allowlisted timer outcomes, never raw application logs or env values.
