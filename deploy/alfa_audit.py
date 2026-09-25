@@ -126,6 +126,7 @@ def main():
                 'backupVolumePresent':any(m.get('destination')=='/backups' for m in row.get('dataVolumes',[])),
                 'networkCount':row.get('networkCount'),'portBindingsPresent':row.get('portBindingsPresent')}
                 for row in candidates],
+            'stoppedCandidates':inventory.get('stoppedCandidates',[]),
             'writerCount':sum(bool(row.get('databasePathConfigured')) and row.get('workingDir')=='/app'
                 and any(m.get('destination')=='/data' and m.get('type')=='volume' and m.get('writable')
                     for m in row.get('dataVolumes',[])) for row in candidates)},ensure_ascii=False),flush=True)
