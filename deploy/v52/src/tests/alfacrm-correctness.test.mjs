@@ -665,7 +665,7 @@ test('unverified PayType directions never replace previous finance projections o
   const { sql } = await prepareSubscriptions(t);
   sql.prepare(`INSERT INTO alfacrm_finance_snapshots(remote_branch_id,payment_id,operation_date,direction,amount_minor,payload_hash,imported_at) VALUES('1','5','2026-09-01','Legacy direction',77,'legacy','2026-01-01')`).run();
   const previous = sql.prepare('SELECT * FROM alfacrm_finance_snapshots').all();
-  const items = [{ id: 5, income: 100, amount: 999, pay_type_id: 5 }, { id: 12, income: -100, pay_type_id: 12 }, { id: 17, amount: 25, outcome: 25, pay_type_id: 1 }];
+  const items = [{ id: 5, document_date: '01.09.2026', income: 100, amount: 999, pay_type_id: 5 }, { id: 12, document_date: '2026-09-02', income: -100, pay_type_id: 12 }, { id: 17, document_date: '03.09.2026', amount: 25, outcome: 25, pay_type_id: 1 }];
   mockRecords({ '1/pay/index': items });
   const previewResponse = await post({ action: 'previewModule', module: 'finance', transitionDate: '2026-09-01' });
   const preview = await previewResponse.json();
@@ -680,6 +680,21 @@ test('unverified PayType directions never replace previous finance projections o
   assert.deepEqual(sql.prepare('SELECT * FROM alfacrm_finance_snapshots').all(), previous);
   assert.deepEqual(sql.prepare("SELECT payload FROM alfacrm_raw_observations WHERE module='finance' ORDER BY record_id").all().map(row => JSON.parse(row.payload)), [items[1],items[2],items[0]]);
   assert.equal(sql.prepare("SELECT COUNT(*) AS n FROM sqlite_master WHERE name='financial_operations'").get().n, 0);
+});
+
+test('finance preview excludes historical payments when AlfaCRM ignores its date filter', async t => {
+  const { sql } = await prepareSubscriptions(t);
+  const items = [
+    { id: 1, document_date: '31.08.2026', income: 100 },
+    { id: 2, document_date: '01.09.2026', income: 200 },
+    { id: 3, document_date: '2026-09-02', income: 300 },
+  ];
+  mockRecords({ '1/pay/index': items });
+  const response = await post({ action: 'previewModule', module: 'finance', transitionDate: '2026-09-01' });
+  const preview = await response.json();
+  assert.equal(response.status, 200);
+  assert.equal(preview.count, 2);
+  assert.equal(sql.prepare("SELECT COUNT(*) AS n FROM alfacrm_raw_observations WHERE module='finance'").get().n, 0);
 });
 
 test('an empty finance period remains explicitly blocked until payment direction is verified', async t => {

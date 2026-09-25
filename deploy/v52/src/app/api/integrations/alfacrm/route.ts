@@ -856,6 +856,15 @@ async function fetchModuleRecords(session: AlfaSession, module: ModuleKey, branc
     if (module === 'families') {
       const dictionary = await fetchPaged(session, `${remoteBranchId}/study-status/index`, {});
       rows.push(...resolveCustomerStatuses(items, dictionary).map(({ record, statusName }) => ({ remoteBranchId, item: record, statusName })));
+    } else if (module === 'finance') {
+      // AlfaCRM can return historical payments even when date_from/date_to are
+      // supplied. Never stage a payment outside the requested transition range.
+      const scoped = items.filter(item => {
+        const date = isoDate(item.document_date);
+        if (!date) throw new AlfaApiError('AlfaCRM вернула оплату без проверяемой даты документа. Загрузка остановлена.');
+        return date >= params.dateFrom && date <= params.dateTo;
+      });
+      rows.push(...scoped.map(item => ({ remoteBranchId, item })));
     } else rows.push(...items.map((item) => ({ remoteBranchId, item })));
   }
   return rows;
