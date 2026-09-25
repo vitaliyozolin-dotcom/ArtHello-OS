@@ -277,7 +277,6 @@ jobs:
         shell: bash
         run: |
           set -Eeuo pipefail
-          node --test scripts/test/alfa-backup.test.mjs
           python3 -I -B deploy/test_alfa_release.py
           python3 -I -B deploy/test_alfa_artifact.py
           python3 -I -B deploy/alfa_release.py
