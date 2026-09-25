@@ -33,7 +33,14 @@ try:
             'databasePathConfigured':any(v.startswith('DATABASE_PATH=/data/') for v in row['Config'].get('Env',[])),
             'dataVolumes':[{'destination':m['Destination'],'writable':m['RW'],'type':m['Type']} for m in row['Mounts'] if m['Destination'] in ['/data','/backups']],
             'portBindingsPresent':bool(row['HostConfig'].get('PortBindings')),
-            'networkCount':len(row['NetworkSettings']['Networks'])})
+            'networkCount':len(row['NetworkSettings']['Networks']),
+            'exitCode':row['State'].get('ExitCode'),
+            'oomKilled':row['State'].get('OOMKilled'),
+            'finishedAt':row['State'].get('FinishedAt'),
+            'errorPresent':bool(row['State'].get('Error')),
+            'restartPolicy':row['HostConfig'].get('RestartPolicy',{}).get('Name'),
+            'healthStatus':row['State'].get('Health',{}).get('Status'),
+            'dataVolumeName':next((m.get('Name') for m in row['Mounts'] if m['Destination']=='/data' and m['Type']=='volume'),None)})
     print(json.dumps({'status':'verified' if len(writers)==1 else 'blocked','candidates':candidates,'applicationContainerId':writers[0]['containerId'] if len(writers)==1 else None,'stoppedCandidates':stopped}))
 except Exception:
     print(json.dumps({'status':'blocked','reason':'REMOTE_INVENTORY_UNCONFIRMED'}))
