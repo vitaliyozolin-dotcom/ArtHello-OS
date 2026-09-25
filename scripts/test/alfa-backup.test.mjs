@@ -87,7 +87,7 @@ test("offline snapshot preserves committed WAL, source bytes and a standalone da
   }
 });
 
-test("enabled Alfa schedule blocks release without modifying source", async () => {
+test("enabled Alfa schedule requires a stopped writer and preserves source", async () => {
   const root = mkdtempSync(join(tmpdir(), "alfa-state-")),
     source = join(root, "source"),
     target = join(root, "snapshot");
@@ -102,9 +102,19 @@ test("enabled Alfa schedule blocks release without modifying source", async () =
     JSON.stringify({ connected: true, autosync: { enabled: true } }),
   );
   db.close();
+  const before = process.env.SNAPSHOT_WRITER_STOPPED;
   try {
+    delete process.env.SNAPSHOT_WRITER_STOPPED;
     await assert.rejects(snapshot(source, target, "central"), /paused/);
+    process.env.SNAPSHOT_WRITER_STOPPED = "1";
+    const accepted = join(root, "accepted");
+    mkdirSync(accepted);
+    const receipt = await snapshot(source, accepted, "central");
+    assert.equal(receipt.integrity, "ok");
+    assert.equal(receipt.databases, 1);
   } finally {
+    if (before === undefined) delete process.env.SNAPSHOT_WRITER_STOPPED;
+    else process.env.SNAPSHOT_WRITER_STOPPED = before;
     rmSync(root, { recursive: true, force: true });
   }
 });

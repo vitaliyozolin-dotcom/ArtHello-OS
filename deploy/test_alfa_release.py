@@ -97,6 +97,9 @@ class ReleaseTests(unittest.TestCase):
             self.assertFalse((Path(directory)/'central.env').exists())
         self.assertIn(('start',old['Id']),calls)
         self.assertFalse(any(call[0]=='rename' for call in calls))
+        backup_call = next(call for call in calls if call[0] == 'run')
+        self.assertLess(next(i for i, call in enumerate(calls) if call[0] == 'stop'), calls.index(backup_call))
+        self.assertIn('SNAPSHOT_WRITER_STOPPED=1', backup_call)
 
     def test_post_public_failure_preserves_current_database_and_recovers_container(self):
         old = runtime(); calls=[]; renamed=False; started=False

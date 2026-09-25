@@ -164,7 +164,7 @@ def run(*args, input=None, timeout=120):
     result = subprocess.run(args, input=input, capture_output=True, timeout=timeout)
     # Docker arguments, stderr and exception text may contain credentials.
     if result.returncode != 0:
-        matched = re.search(rb'SNAPSHOT_REFUSED=(DATABASE_SCHEMA|DIARY_IDENTITY|CAPACITY|INTEGRITY|DATABASE_MISSING|EACCES|EROFS|ENOSPC|UNCONFIRMED)(?:\r?\n|$)', result.stderr)
+        matched = re.search(rb'SNAPSHOT_REFUSED=(DATABASE_SCHEMA|DIARY_IDENTITY|CAPACITY|INTEGRITY|DATABASE_MISSING|CONNECTOR_NOT_QUIESCED|EACCES|EROFS|ENOSPC|UNCONFIRMED)(?:\r?\n|$)', result.stderr)
         raise Refused('SNAPSHOT_' + matched[1].decode() if matched else 'COMMAND_FAILED')
     return result.stdout
 
@@ -288,6 +288,7 @@ def upgrade(old, plan, work, run_key, current_main):
         for container_id in docker('ps', '-q').decode().split():
             other = inspect(container_id)
             require(not any(m.get('Name') == plan['dataVolume'] and m.get('RW') for m in other['Mounts']), 'OTHER_WRITER')
+        require(inspect(old['Id'])['State']['Running'] is False, 'WRITER_NOT_STOPPED')
         docker('volume', 'create', '--label', 'arthello.scope=production-backup', backup_volume)
         checkpoint('wal-complete-snapshot')
         output = docker('run', '--rm', '--network', 'none', '--read-only', '--user', '0:0',
@@ -295,7 +296,8 @@ def upgrade(old, plan, work, run_key, current_main):
                         '--mount', 'type=volume,src=' + plan['dataVolume'] + ',dst=/source,readonly,volume-nocopy',
                         '--mount', 'type=volume,src=' + backup_volume + ',dst=/snapshot,volume-nocopy',
                         '--mount', 'type=bind,src=' + str(ROOT / 'deploy/alfa_backup.mjs') + ',dst=/run/backup.mjs,readonly',
-                        '--env', 'SNAPSHOT_SYSTEM=' + system, '--entrypoint', 'node', plan['image'], '/run/backup.mjs', timeout=600)
+                        '--env', 'SNAPSHOT_SYSTEM=' + system, '--env', 'SNAPSHOT_WRITER_STOPPED=1',
+                        '--entrypoint', 'node', plan['image'], '/run/backup.mjs', timeout=600)
         backup_receipt = json.loads(output)
         require(backup_receipt['integrity'] == 'ok', 'BACKUP')
         current_main()

@@ -7,9 +7,9 @@ on:
         description: Inspect, remove completed checkouts, or retire two exact unused images
         type: choice
         required: true
-        options: [inspect, inspect-images, inspect-autosync, inspect-snapshot, clean, images, images-extra, retire-e2e]
+        options: [inspect, inspect-images, inspect-autosync, inspect-snapshot, clean, images, images-extra, retire-e2e, retire-e2e-next]
       confirmation:
-        description: For clean type CLEAN ARTHELLO OLD CHECKOUTS; images RETIRE TWO UNUSED IMAGES; images-extra RETIRE TWO EXTRA UNUSED IMAGES; retire-e2e RETIRE EXACT UNUSED E2E IMAGE
+        description: For clean type CLEAN ARTHELLO OLD CHECKOUTS; images RETIRE TWO UNUSED IMAGES; images-extra RETIRE TWO EXTRA UNUSED IMAGES; retire-e2e RETIRE EXACT UNUSED E2E IMAGE; retire-e2e-next RETIRE TWO VERIFIED UNUSED E2E IMAGES
         type: string
         required: false
 
@@ -33,7 +33,8 @@ jobs:
        (inputs.operation == 'clean' && inputs.confirmation == 'CLEAN ARTHELLO OLD CHECKOUTS') ||
        (inputs.operation == 'images' && inputs.confirmation == 'RETIRE TWO UNUSED IMAGES') ||
        (inputs.operation == 'images-extra' && inputs.confirmation == 'RETIRE TWO EXTRA UNUSED IMAGES') ||
-       (inputs.operation == 'retire-e2e' && inputs.confirmation == 'RETIRE EXACT UNUSED E2E IMAGE'))
+       (inputs.operation == 'retire-e2e' && inputs.confirmation == 'RETIRE EXACT UNUSED E2E IMAGE') ||
+       (inputs.operation == 'retire-e2e-next' && inputs.confirmation == 'RETIRE TWO VERIFIED UNUSED E2E IMAGES'))
     runs-on: [self-hosted, linux, x64, arthello-gateway]
     environment: production-ru
     timeout-minutes: 10
@@ -49,6 +50,48 @@ jobs:
             -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/vnd.github+json' \
             https://api.github.com/repos/vitaliyozolin-dotcom/ArtHello-OS/git/ref/heads/main | jq -er '.object.sha')"
           test "$current_main" = "$GITHUB_SHA"
+          if [ "$OPERATION" = retire-e2e-next ]; then
+            # D233: exact reproducible test images, zero container references in run 36124326756.
+            ids=(
+              sha256:4ae2a9d60c93808e8e962a19d0c0811ab04c19f1fe0f231636ceb8ac5493843d
+              sha256:bef8bd2fb5a808928e7bf25f657b3a7224e5d52a431bff6ec41d6de79592dfd7
+            )
+            tags=(
+              arthello-e2e:15f7d61677c489282cc9483239e8131d787d4731
+              arthello-e2e:5df015323455ea7e513a1386f840016cbb6c249c
+            )
+            check_e2e() {
+              local i id tag
+              for i in 0 1; do
+                id="${ids[$i]}"; tag="${tags[$i]}"
+                docker image inspect "$id" | jq -e --arg id "$id" --arg tag "$tag" --arg rev "${tag#*:}" \
+                  'length == 1 and .[0].Id == $id and .[0].RepoTags == [$tag] and
+                   .[0].Config.Labels["org.opencontainers.image.revision"] == $rev' >/dev/null
+                test "$(docker image inspect "$tag" --format '{{.Id}}')" = "$id"
+              done
+              mapfile -t containers < <(docker ps -aq --no-trunc)
+              if [ "${#containers[@]}" -gt 0 ]; then
+                docker inspect "${containers[@]}" | jq -e --arg a "${ids[0]}" --arg b "${ids[1]}" \
+                  'all(.[]; .Image != $a and .Image != $b)' >/dev/null
+              fi
+            }
+            echo '### Space before (KiB)'
+            df -Pk -- "$GITHUB_WORKSPACE"
+            check_e2e
+            current_main="$(curl --fail --silent --show-error --max-time 20 \
+              -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/vnd.github+json' \
+              https://api.github.com/repos/vitaliyozolin-dotcom/ArtHello-OS/git/ref/heads/main | jq -er '.object.sha')"
+            test "$current_main" = "$GITHUB_SHA"
+            check_e2e
+            for id in "${ids[@]}"; do docker image rm --no-prune "$id"; done
+            for id in "${ids[@]}"; do
+              if docker image inspect "$id" >/dev/null 2>&1; then exit 2; fi
+            done
+            echo '### Space after (KiB)'
+            df -Pk -- "$GITHUB_WORKSPACE"
+            echo 'EXACT_UNUSED_E2E_IMAGES_RETIRED=1'
+            exit 0
+          fi
           if [ "$OPERATION" = inspect-snapshot ]; then
             # Read-only capacity diagnosis after D194 run 36120078514. No database content is printed.
             live_id='66cc912f6088bc1b929d23ee07fc906b94e82fdd2e747ce6419fb7b2fe3a7b91'

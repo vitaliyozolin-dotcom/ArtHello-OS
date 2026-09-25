@@ -92,7 +92,9 @@ export async function snapshot(source, target, system) {
         .get();
       if (!row) throw Error("connector missing");
       const state = JSON.parse(row.state_value);
-      if (!state.connected || state.autosync?.enabled)
+      // The release controller stops the only writer before passing this marker.
+      // A persisted autosync schedule may remain enabled while the runtime is stopped.
+      if (!state.connected || (state.autosync?.enabled && process.env.SNAPSHOT_WRITER_STOPPED !== "1"))
         throw Error("AlfaCRM must be connected and paused");
     } else if (
       system !== "central" &&
@@ -144,7 +146,7 @@ if (
       ),
     );
   } catch (error) {
-    const codes = { "ambiguous application database": "DATABASE_SCHEMA", "configured database schema": "DATABASE_SCHEMA", "diary identity mismatch": "DIARY_IDENTITY", "insufficient snapshot capacity": "CAPACITY", "snapshot integrity": "INTEGRITY", "database missing": "DATABASE_MISSING" };
+    const codes = { "ambiguous application database": "DATABASE_SCHEMA", "configured database schema": "DATABASE_SCHEMA", "diary identity mismatch": "DIARY_IDENTITY", "insufficient snapshot capacity": "CAPACITY", "snapshot integrity": "INTEGRITY", "database missing": "DATABASE_MISSING", "AlfaCRM must be connected and paused": "CONNECTOR_NOT_QUIESCED" };
     console.error("SNAPSHOT_REFUSED=" + (codes[error?.message] ?? (["EACCES", "EROFS", "ENOSPC"].includes(error?.code) ? error.code : "UNCONFIRMED")));
     process.exitCode = 2;
   }
