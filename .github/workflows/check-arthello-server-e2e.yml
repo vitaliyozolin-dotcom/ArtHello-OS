@@ -84,6 +84,132 @@ jobs:
           "$PRECHECK_NODE" --test scripts/test/server-e2e-preflight.test.mjs
           python3 -I .github/scripts/test-d082-route-diagnostic.py
 
+      - name: Verify administrative client and diary access read only
+        if: >-
+          github.event_name == 'workflow_run' &&
+          startsWith(github.event.workflow_run.head_commit.message, 'D239: read-only admin access audit')
+        working-directory: preflight-${{ github.run_id }}-${{ github.run_attempt }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test "$(git rev-parse HEAD)" = "$CHECKED_SOURCE_SHA"
+          expected_source='d066c3e7d94124efd847310e0d5ae9822401fa2f'
+          expected_live='be2c859257c765ff3fdffda4247757328058ec4f3efecd67eb5312cf6f2c8b35'
+          expected_image='sha256:c4b2621160a2ecbad49f48d34ee8584a37c300a31aebb5c44658b7cace3048da'
+          mapfile -t live_ids < <(docker ps --filter 'name=^/arthello-direct-' --format '{{.ID}}')
+          test "${#live_ids[@]}" -eq 1
+          live_id="$(docker inspect "${live_ids[0]}" --format '{{.Id}}')"
+          test "$live_id" = "$expected_live"
+          test "$(docker inspect "$live_id" --format '{{.State.Running}}')" = true
+          test "$(docker inspect "$live_id" --format '{{.Image}}')" = "$expected_image"
+          test "$(docker inspect "$live_id" --format '{{index .Config.Labels "org.opencontainers.image.revision"}}')" = "$expected_source"
+          data_volume="$(docker inspect "$live_id" | jq -er '
+            [.[0].Mounts[] | select(.Destination == "/data" and .Type == "volume" and .RW == true)]
+            | if length == 1 then .[0].Name else error("data_mount") end
+          ')"
+          test "$data_volume" = arthello-direct-v44-data
+          helper="arthello-admin-access-audit-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          if docker inspect "$helper" >/dev/null 2>&1; then
+            echo 'ADMIN_ACCESS_AUDIT_BLOCKED=helper_exists'
+            exit 2
+          fi
+          cleanup() { docker rm -f "$helper" >/dev/null 2>&1 || true; }
+          trap cleanup EXIT
+          set +e
+          report="$(
+            docker run --name "$helper" --rm --network none --read-only --user 1000:1000               --cap-drop ALL --security-opt no-new-privileges:true --pids-limit 32 --memory 256m               --mount "type=volume,src=$data_volume,dst=/data,readonly,volume-nocopy"               --entrypoint node "$expected_image" --input-type=module - <<'NODE'
+          import fs from 'node:fs';
+          import path from 'node:path';
+          import { DatabaseSync } from 'node:sqlite';
+
+          const targets = ['Екатерина Груданова', 'Наталья Гутаковская', 'Линда Иванова'];
+          const atlasRoles = new Set(['director','deputy','methodist','teacher','admin','tech_admin']);
+
+          function sqliteFiles(root) {
+            const result = [];
+            for (const entry of fs.readdirSync(root, { withFileTypes: true })) {
+              const item = path.join(root, entry.name);
+              if (entry.isDirectory()) result.push(...sqliteFiles(item));
+              else if (entry.isFile() && entry.name.endsWith('.sqlite')) result.push(item);
+            }
+            return result;
+          }
+
+          const candidates = [];
+          for (const file of sqliteFiles('/data')) {
+            let db;
+            try {
+              db = new DatabaseSync(file, { readOnly: true });
+              const tables = new Set(db.prepare("select name from sqlite_master where type='table'").all().map(row => row.name));
+              if (tables.has('app_users') && tables.has('user_system_access')) candidates.push(file);
+            } catch {
+            } finally {
+              db?.close();
+            }
+          }
+          if (candidates.length !== 1) throw new Error('canonical_database_ambiguous');
+
+          const db = new DatabaseSync(candidates[0], { readOnly: true });
+          try {
+            const results = {};
+            for (const name of targets) {
+              const users = db.prepare(`select id,role,allowed_modules,is_administrative,status,access_version
+                from app_users where display_name=?`).all(name);
+              if (users.length !== 1) {
+                results[name] = { found: users.length, cardsEditable: false, familyDiaryManager: false,
+                  atlasDiaryAccess: false, schoolDiaryAccess: false };
+                continue;
+              }
+              const user = users[0];
+              let modules = null;
+              const raw = String(user.allowed_modules ?? '').trim();
+              if (raw) {
+                try {
+                  const parsed = JSON.parse(raw);
+                  if (!Array.isArray(parsed) || parsed.some(value => typeof value !== 'string')) throw new Error();
+                  modules = parsed;
+                } catch {
+                  modules = [];
+                }
+              }
+              const clientsAssigned = modules === null || modules.includes('clients');
+              const roleCanEditCards = user.role === 'Директор' || user.role === 'Администратор';
+              const activeAdministrative = user.status === 'Активен' && Number(user.is_administrative) === 1;
+              const cardsEditable = activeAdministrative && roleCanEditCards && clientsAssigned;
+              const grants = db.prepare(`select system_id,role,status,access_version,last_sync_status
+                from user_system_access where user_id=? and system_id in ('SYS-SCHOOL-ATLAS','SYS-SCHOOL-1-11')`).all(user.id);
+              const atlas = grants.find(grant => grant.system_id === 'SYS-SCHOOL-ATLAS');
+              const school = grants.find(grant => grant.system_id === 'SYS-SCHOOL-1-11');
+              const validGrant = grant => Boolean(grant && grant.status === 'Активен' &&
+                Number(grant.access_version) === Number(user.access_version));
+              results[name] = {
+                found: 1,
+                cardsEditable,
+                familyDiaryManager: cardsEditable,
+                atlasDiaryAccess: validGrant(atlas) && atlasRoles.has(String(atlas.role)),
+                schoolDiaryAccess: validGrant(school),
+              };
+            }
+            const allManagers = targets.every(name => results[name]?.cardsEditable && results[name]?.familyDiaryManager);
+            const katyaAtlas = results['Екатерина Груданова']?.atlasDiaryAccess === true;
+            console.log('ADMIN_ACCESS_READONLY=' + JSON.stringify({
+              productionSource: 'd066c3e7d94124efd847310e0d5ae9822401fa2f',
+              productionMutations: false,
+              allManagers,
+              katyaAtlas,
+              accounts: results,
+            }));
+            if (!allManagers || !katyaAtlas) process.exitCode = 2;
+          } finally {
+            db.close();
+          }
+          NODE
+          )"
+          result=$?
+          set -e
+          printf '%s\n' "$report"
+          exit "$result"
+
       - name: Inventory Atlas production prerequisites without changing gateway
         working-directory: preflight-${{ github.run_id }}-${{ github.run_attempt }}
         shell: bash
