@@ -39,6 +39,7 @@ type SettingsData = AccessContext & {
   familyAccessGrants: Array<{ id: string; familyEntityId: string; principalEntityId: string; principalType: string; role: string; loginType: string; login: string; deliveryChannel: string; deliveryStatus: string; status: string; accessVersion: number; lastSyncStatus: string; lastSyncedAt: string }>;
   systemRoleOptions: Record<string, Array<{ value: string; label: string }>>;
   canManage: boolean;
+  canManageFamilyAccess: boolean;
   authBoundary: string;
 };
 
@@ -76,6 +77,7 @@ export function SettingsWorkspace({ close, notify, onContextChanged, initialTab 
       const payload = await response.json() as SettingsData & { error?: string };
       if (!response.ok) throw new Error(payload.error ?? "Настройки недоступны");
       setData(payload);
+      if (initialTab === "Доступы" && !payload.canManage && payload.canManageFamilyAccess) setTab("Семьи");
       setFamilyLoaded(false);
       setFamilyQuery("");
       setFamilyAppliedQuery("");
@@ -85,7 +87,7 @@ export function SettingsWorkspace({ close, notify, onContextChanged, initialTab 
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Настройки недоступны");
     } finally { setLoading(false); }
-  }, [onContextChanged]);
+  }, [initialTab, onContextChanged]);
 
   const loadFamilyPage = useCallback(async (query: string, offset: number, append: boolean) => {
     setFamilyLoading(true);
@@ -116,10 +118,10 @@ export function SettingsWorkspace({ close, notify, onContextChanged, initialTab 
 
   useEffect(() => { const timer = window.setTimeout(() => void load(), 0); return () => window.clearTimeout(timer); }, [load]);
   useEffect(() => {
-    if (tab !== "Семьи" || !data?.canManage || familyLoaded || familyLoading || familyError) return;
+    if (tab !== "Семьи" || !data?.canManageFamilyAccess || familyLoaded || familyLoading || familyError) return;
     const timer = window.setTimeout(() => void loadFamilyPage("", 0, false), 0);
     return () => window.clearTimeout(timer);
-  }, [data?.canManage, familyError, familyLoaded, familyLoading, loadFamilyPage, tab]);
+  }, [data?.canManageFamilyAccess, familyError, familyLoaded, familyLoading, loadFamilyPage, tab]);
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
@@ -246,7 +248,7 @@ export function SettingsWorkspace({ close, notify, onContextChanged, initialTab 
     <section className="ahSettingsModal" role="dialog" aria-modal="true" aria-labelledby="settings-title">
       <header className="settings-head"><div><p>Управление системой</p><h2 id="settings-title">Настройки</h2><span>Филиалы, доступы, личное меню, интеграции и проверка системы</span></div><button onClick={close} aria-label="Закрыть">×</button></header>
       {loading ? <EmptyState className="ahSettingsState" density="compact" title="Загружаем настройки" description="Проверяем права, филиалы и доступные системы." /> : error || !data ? <EmptyState className="ahSettingsState" density="compact" title={error || "Настройки недоступны"} description="Рабочие права и филиалы не заменены заглушкой." action={<Button variant="secondary" onClick={() => void load()}>Повторить</Button>} /> : <>
-        <div className="ahSettingsTabs"><Tabs items={settingsTabs.filter((item) => item !== "Резервные копии" || (data.me.id === "USR-OWNER" && data.me.role === "Собственник" && data.me.isAdministrative)).map((item) => ({ id: item, label: item }))} value={tab} onChange={setTab} ariaLabel="Разделы настроек" /></div>
+        <div className="ahSettingsTabs"><Tabs items={settingsTabs.filter((item) => (item !== "Семьи" || data.canManageFamilyAccess) && (item !== "Резервные копии" || (data.me.id === "USR-OWNER" && data.me.role === "Собственник" && data.me.isAdministrative))).map((item) => ({ id: item, label: item }))} value={tab} onChange={setTab} ariaLabel="Разделы настроек" /></div>
         <div className="settings-body" ref={settingsBodyRef}>
           {tab === "Резервные копии" && data.me.id === "USR-OWNER" && data.me.role === "Собственник" && data.me.isAdministrative ? <BackupWorkspace notify={notify} /> : null}
           {tab === "Филиалы" ? <div className="settings-grid">
@@ -323,7 +325,7 @@ export function SettingsWorkspace({ close, notify, onContextChanged, initialTab 
             <div className="settings-boundary"><strong>Как работает вход</strong><span>{data.authBoundary}</span></div>
           </div> : null}
 
-          {tab === "Семьи" ? <div className="settings-grid users-grid family-access-grid">
+          {tab === "Семьи" && data.canManageFamilyAccess ? <div className="settings-grid users-grid family-access-grid">
             <div className="settings-boundary family-source-boundary"><strong>Только выдача доступа</strong><span>Ручная карточка уже подтверждена её автором. Для импорта и конфликтов сначала нужна сверка источника. Сам доступ всегда выдаётся здесь отдельным действием.</span></div>
             <article className="settings-card wide">
               <header><div><p>Центральный реестр</p><h3>Карточки семей</h3></div><span>{familyLoaded ? data.familyDirectoryTotal : "…"}</span></header>
