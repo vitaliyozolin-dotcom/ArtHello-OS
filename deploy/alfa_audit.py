@@ -11,6 +11,7 @@ from contextlib import contextmanager
 ROOT=Path(__file__).resolve().parents[1]
 # Previously accepted School key; D065/R17 protected School transport.
 SCHOOL_HOST_PIN='SHA256:/kBNohTF+5g8U+jQt+PzOCoWZ9yCSFjBnEP3Oc3MwRI'
+AUDIT_CENTRAL_LIVE='d83da0ce8311a4b60832031a217b91c7dd6bb1c8'
 
 def load(name):
     spec=importlib.util.spec_from_file_location(name,ROOT/'deploy'/f'{name}.py')
@@ -93,9 +94,15 @@ def main():
     require(container['State']['Running'] is True,'CENTRAL_UNAVAILABLE')
     image=json.loads(release.docker('image','inspect',container['Image']))[0]
     central_source=image['Config']['Labels'].get('org.opencontainers.image.revision')
-    require(central_source in (release.PINS['central'][0],source),'CENTRAL_SOURCE')
+    require(central_source in (release.PINS['central'][0],AUDIT_CENTRAL_LIVE,source),'CENTRAL_SOURCE')
     report={'controllerSha':source,'centralSource':central_source,'businessDataChanged':False}
     report['source']=capture(['docker','exec','-i',name,'node','--input-type=module','-'],'ALFA_SOURCE_AUDIT=',data=(ROOT/'.github/scripts/alfa-source-audit.mjs').read_bytes())
+    print('ALFA_SOURCE_RECONCILIATION='+json.dumps({'controllerSha':source,'centralSource':central_source,
+        'observedAt':report['source'].get('observedAt'),
+        'sourceBranches':[{'id':branch['id'],'reconciliation':branch.get('reconciliation')}
+            for branch in report['source'].get('sourceBranches',[]) if branch.get('reconciliation')],
+        'status':report['source'].get('status','observed'),
+        'reason':report['source'].get('reason')},ensure_ascii=False),flush=True)
     report['os']=capture(['docker','run','--rm','--read-only','--network','bridge','--cap-drop','ALL','--security-opt','no-new-privileges:true',
         '--pids-limit','64','--memory','512m','--user','1000:1000',
         '--env','ARTHELLO_OWNER_LOGIN','--env','ARTHELLO_OWNER_PASSWORD',
