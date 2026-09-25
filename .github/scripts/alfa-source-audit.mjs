@@ -43,6 +43,42 @@ export function summarizeBranch(records, dictionary, branch) {
   return result;
 }
 
+export function summarizeLessonLinks(records, groupRecords) {
+  const known = new Set(groupRecords.map(row => String(row.id)));
+  const result = {total:records.length,withCurrentGroup:0,withUnknownGroup:0,withoutGroupWithCustomers:0,withoutGroupWithoutCustomers:0,missingId:0,byLessonType:{},unknownGroupIds:{}};
+  for (const row of records) {
+    if (!/^[1-9]\d*$/.test(String(row.id))) result.missingId++;
+    const ids = Array.isArray(row.group_ids) ? row.group_ids.map(String) : row.group_id ? [String(row.group_id)] : [];
+    if (!ids.length) {
+      const key=Array.isArray(row.customer_ids)&&row.customer_ids.length ? 'withoutGroupWithCustomers' : 'withoutGroupWithoutCustomers';
+      result[key]++;
+      const lessonType=/^[1-9]\d*$/.test(String(row.lesson_type_id)) ? String(row.lesson_type_id) : 'UNKNOWN';
+      result.byLessonType[lessonType]=(result.byLessonType[lessonType]??0)+1;
+    } else if (ids.every(id=>known.has(id))) result.withCurrentGroup++;
+    else {
+      result.withUnknownGroup++;
+      for(const id of ids) if(/^[1-9]\d*$/.test(id)&&!known.has(id)) result.unknownGroupIds[id]=(result.unknownGroupIds[id]??0)+1;
+    }
+  }
+  return result;
+}
+
+export function summarizePayPage(payload, from, to) {
+  if (!Array.isArray(payload.items) || !Number.isSafeInteger(Number(payload.total)) || Number(payload.total)<0) throw Error('PAY_PAGE_INVALID');
+  const result={total:Number(payload.total),sampled:payload.items.length,before:0,inRange:0,after:0,unparseableDate:0,types:{},currencies:{}};
+  for(const row of payload.items) {
+    const value=String(row.document_date??'');
+    const match=value.match(/^(\d{4})[.-](\d{2})[.-](\d{2})$/)??value.match(/^(\d{2})[.-](\d{2})[.-](\d{4})$/);
+    const date=!match?'':match[1].length===4?`${match[1]}-${match[2]}-${match[3]}`:`${match[3]}-${match[2]}-${match[1]}`;
+    result[!date?'unparseableDate':date<from?'before':date>to?'after':'inRange']++;
+    const type=/^[1-9]\d*$/.test(String(row.pay_type_id))?String(row.pay_type_id):'UNKNOWN';
+    result.types[type]=(result.types[type]??0)+1;
+    const currency=/^[A-Za-z]{3}$/.test(String(row.currency))?String(row.currency).toUpperCase():'UNKNOWN';
+    result.currencies[currency]=(result.currencies[currency]??0)+1;
+  }
+  return result;
+}
+
 async function main() {
   const candidates = [];
   for (const path of databases('/data/d1')) {
@@ -117,6 +153,17 @@ async function main() {
     const records=await paged(`${id}/customer/index`,{is_study:1,removed:0,withGroups:true});
     const groups=await paged(`${id}/group/index`,{removed:0});
     const teachers=await paged(`${id}/teacher/index`,{removed:0});
+    let reconciliation;
+    if(state.branchMappings[id]) {
+      const from='2026-09-01',to='2026-09-24';
+      const lessons=await paged(`${id}/lesson/index`,{date_from:from,date_to:to});
+      const lessonLinks=summarizeLessonLinks(lessons,groups);
+      const payFilters={date_from:from.replaceAll('-','.'),date_to:to.replaceAll('-','.')};
+      const payPeriod=summarizePayPage(await request(`${id}/pay/index`,{...payFilters,page:0,pageSize:500}),from,to);
+      const payOneDay=summarizePayPage(await request(`${id}/pay/index`,{date_from:'2026.09.01',date_to:'2026.09.01',page:0,pageSize:500}),from,'2026-09-01');
+      const payTypes=await paged(`${id}/pay-type/index`);
+      reconciliation={lessonLinks,payPeriod,payOneDay,payTypeIds:payTypes.map(row=>String(row.id)).filter(value=>/^[1-9]\d*$/.test(value)).sort()};
+    }
     let teaching;
     if(['8','10'].includes(id)) {
       const period={date_from:'2026-09-01',date_to:'2026-09-30'};
@@ -145,7 +192,7 @@ async function main() {
       mappedIncluded.add(customerId);const memberships=mappedMemberships.get(customerId)??new Set();memberships.add(id);mappedMemberships.set(customerId,memberships);
     }
     const safeTitle = value => String(value??'').replace(/\d{5,}/g,'*').replace(/[a-zа-яё]+/gi,word=>['класс','кл','атлас','школа','лет','мини','сад','садик','группа','нулевой','первый','второй','третий','четвертый','подготовка','школе','к','младшая','старшая','средняя','подготовительная'].includes(word.toLowerCase())?word:'*');
-    report.sourceBranches.push({id,teaching,localBranch:state.branchMappings[id]??null,...summary,customerFields:records[0]?Object.keys(records[0]).sort():[],teacherCount:teachers.length,teachersInBranch:teachers.filter(t=>Array.isArray(t.branch_ids)&&t.branch_ids.map(String).includes(id)).length,groups:groups.map(group=>({id:String(group.id),safeTitle:safeTitle(group.name),grade:String(group.name??'').match(/(?:^|[^0-9])(1[01]|[0-9])[\s_.-]*(?:класс|кл\b)/i)?.[1]??null,year:String(group.name??'').match(/202[0-9].{0,3}202[0-9]/)?.[0]??null,customers:summary.groups[String(group.id)]??0}))});
+    report.sourceBranches.push({id,teaching,reconciliation,localBranch:state.branchMappings[id]??null,...summary,customerFields:records[0]?Object.keys(records[0]).sort():[],teacherCount:teachers.length,teachersInBranch:teachers.filter(t=>Array.isArray(t.branch_ids)&&t.branch_ids.map(String).includes(id)).length,groups:groups.map(group=>({id:String(group.id),safeTitle:safeTitle(group.name),grade:String(group.name??'').match(/(?:^|[^0-9])(1[01]|[0-9])[\s_.-]*(?:класс|кл\b)/i)?.[1]??null,year:String(group.name??'').match(/202[0-9].{0,3}202[0-9]/)?.[0]??null,customers:summary.groups[String(group.id)]??0}))});
   }
   report.uniqueIncludedCustomerIds=unique.size;
   report.teacherTransportReads=teacherReads;
