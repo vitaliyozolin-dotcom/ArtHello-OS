@@ -244,6 +244,41 @@ def public_health():
         require(len(body) <= 16384 and json.loads(body).get('status') == 'ok', 'PUBLIC_HEALTH')
 
 
+def stable_health_window(name, port, restart_count, soak_checks=13, recovery_checks=24, required_successes=3):
+    # AlfaCRM autosync intentionally starts 30 seconds after process boot. Its
+    # first due import can briefly make the SQLite-backed health route return
+    # busy while the process itself remains healthy. Do not accept that state
+    # indefinitely: the candidate must stay running without a restart and then
+    # recover several consecutive database-backed health checks before public
+    # traffic acceptance.
+    for _ in range(soak_checks):
+        time.sleep(5)
+        current = inspect(name)
+        require(current['State']['Running'] is True, 'RUNTIME_STOPPED')
+        require(current['RestartCount'] == restart_count, 'UNSTABLE_RUNTIME')
+        try:
+            health(name, port)
+        except Refused as error:
+            if str(error) != 'COMMAND_FAILED':
+                raise
+    consecutive = 0
+    for _ in range(recovery_checks):
+        current = inspect(name)
+        require(current['State']['Running'] is True, 'RUNTIME_STOPPED')
+        require(current['RestartCount'] == restart_count, 'UNSTABLE_RUNTIME')
+        try:
+            health(name, port)
+            consecutive += 1
+            if consecutive >= required_successes:
+                return
+        except Refused as error:
+            if str(error) != 'COMMAND_FAILED':
+                raise
+            consecutive = 0
+        time.sleep(5)
+    raise Refused('HEALTH_RECOVERY')
+
+
 def upgrade(old, plan, work, run_key, current_main):
     name, retained = plan['name'], plan['name'] + '-pre-d194-' + run_key
     system = plan['system']
@@ -324,10 +359,7 @@ def upgrade(old, plan, work, run_key, current_main):
         require(set(actual['Config']['Env']) == set(plan['environment']), 'ENV_DRIFT')
         require(any(m.get('Name') == plan['dataVolume'] and m['Destination'] == '/data' and m['RW'] for m in actual['Mounts']), 'DATA_DRIFT')
         restart_count = actual['RestartCount']
-        for _ in range(13):
-            time.sleep(5)
-            health(name, port)
-            require(inspect(name)['RestartCount'] == restart_count, 'UNSTABLE_RUNTIME')
+        stable_health_window(name, port, restart_count)
         checkpoint('public-health')
         public_health()
         current_main()
