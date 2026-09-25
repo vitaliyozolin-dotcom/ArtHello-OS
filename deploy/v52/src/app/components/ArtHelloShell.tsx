@@ -171,10 +171,11 @@ export default function ArtHelloShell({ displayName: displayNameOverride = "" }:
   const accessContext = useMemo(() => ({
     apiRole: authenticatedUser?.apiRole ?? "",
     isSystemOwner: Boolean(authenticatedUser?.isSystemOwner),
+    isAdministrative: Boolean(authenticatedUser?.isAdministrative),
     canAccessMedical: Boolean(authenticatedUser?.canAccessMedical),
     canAccessPay: Boolean(authenticatedUser?.canAccessPay),
     allowedModules: authenticatedUser?.allowedModules,
-  }), [authenticatedUser?.allowedModules, authenticatedUser?.apiRole, authenticatedUser?.canAccessMedical, authenticatedUser?.canAccessPay, authenticatedUser?.isSystemOwner]);
+  }), [authenticatedUser?.allowedModules, authenticatedUser?.apiRole, authenticatedUser?.canAccessMedical, authenticatedUser?.canAccessPay, authenticatedUser?.isAdministrative, authenticatedUser?.isSystemOwner]);
   const isModuleAllowed = useCallback((id: ModuleId) => canAccessModule(accessContext, id), [accessContext]);
   useEffect(() => {
     if (!notice) return;
