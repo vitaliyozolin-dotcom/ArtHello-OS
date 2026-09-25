@@ -160,6 +160,17 @@ PINS = {
 }
 
 
+# Exact verified D194 #75 receipt; do not accept a label without its container and image.
+CENTRAL_PREDECESSORS = {
+    ('d83da0ce8311a4b60832031a217b91c7dd6bb1c8',
+     '66cc912f6088bc1b929d23ee07fc906b94e82fdd2e747ce6419fb7b2fe3a7b91',
+     'sha256:70fc84b541c2bffebd8d3130544d98158d25ced0c788890511b7d96a39c50216'),
+    ('d066c3e7d94124efd847310e0d5ae9822401fa2f',
+     'be2c859257c765ff3fdffda4247757328058ec4f3efecd67eb5312cf6f2c8b35',
+     'sha256:c4b2621160a2ecbad49f48d34ee8584a37c300a31aebb5c44658b7cace3048da'),
+}
+
+
 def run(*args, input=None, timeout=120):
     result = subprocess.run(args, input=input, capture_output=True, timeout=timeout)
     # Docker arguments, stderr and exception text may contain credentials.
@@ -422,15 +433,15 @@ def main():
     require(len(names) == 1, 'LIVE_AMBIGUOUS')
     old = inspect(names[0])
     old_image = json.loads(docker('image', 'inspect', old['Image']))[0]
-    require(old_image['Config']['Labels']['org.opencontainers.image.revision'] == PINS[system][0], 'PREDECESSOR')
+    revision = old_image['Config']['Labels']['org.opencontainers.image.revision']
+    if system == 'central':
+        require((revision, old['Id'], old['Image']) in CENTRAL_PREDECESSORS, 'PREDECESSOR_INVENTORY')
+    else:
+        require(revision == PINS[system][0], 'PREDECESSOR')
     if system == 'atlas':
         require(old['Id'] == 'c617551b662f2f45afe4ebba39507479c285769b580627e5c030aa5a3efffbba'
                 and old['Image'] == 'sha256:38b25e525cbcbebff5e581840138f01f5f89dd7aa521eecec0ba5b15fd1bca93', 'PREDECESSOR_INVENTORY')
     plan = runtime_plan(old, system, image, image_source, image_tree)
-    if system == 'central':
-        require(old['Id'] == '66cc912f6088bc1b929d23ee07fc906b94e82fdd2e747ce6419fb7b2fe3a7b91'
-                and old['Image'] == 'sha256:70fc84b541c2bffebd8d3130544d98158d25ced0c788890511b7d96a39c50216',
-                'PREDECESSOR_INVENTORY')
     public_health()
     result = upgrade(old, plan, work, run_key, current_main)
     receipt = {'decision': 'D194', 'state': 'runtime-verified', 'controllerSha': source, 'verificationRuns': runs,

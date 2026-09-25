@@ -11,7 +11,8 @@ from contextlib import contextmanager
 ROOT=Path(__file__).resolve().parents[1]
 # Previously accepted School key; D065/R17 protected School transport.
 SCHOOL_HOST_PIN='SHA256:/kBNohTF+5g8U+jQt+PzOCoWZ9yCSFjBnEP3Oc3MwRI'
-AUDIT_CENTRAL_LIVE='d83da0ce8311a4b60832031a217b91c7dd6bb1c8'
+AUDIT_CENTRAL_LIVE=('d83da0ce8311a4b60832031a217b91c7dd6bb1c8',
+                    'd066c3e7d94124efd847310e0d5ae9822401fa2f')
 
 def load(name):
     spec=importlib.util.spec_from_file_location(name,ROOT/'deploy'/f'{name}.py')
@@ -94,7 +95,7 @@ def main():
     require(container['State']['Running'] is True,'CENTRAL_UNAVAILABLE')
     image=json.loads(release.docker('image','inspect',container['Image']))[0]
     central_source=image['Config']['Labels'].get('org.opencontainers.image.revision')
-    require(central_source in (release.PINS['central'][0],AUDIT_CENTRAL_LIVE,source),'CENTRAL_SOURCE')
+    require(central_source in (release.PINS['central'][0],*AUDIT_CENTRAL_LIVE,source),'CENTRAL_SOURCE')
     report={'controllerSha':source,'centralSource':central_source,'businessDataChanged':False}
     report['source']=capture(['docker','exec','-i',name,'node','--input-type=module','-'],'ALFA_SOURCE_AUDIT=',data=(ROOT/'.github/scripts/alfa-source-audit.mjs').read_bytes())
     print('ALFA_SOURCE_RECONCILIATION='+json.dumps({'controllerSha':source,'centralSource':central_source,

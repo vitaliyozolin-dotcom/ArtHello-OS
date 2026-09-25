@@ -35,6 +35,11 @@ class ReleaseTests(unittest.TestCase):
         source = Path(release.__file__).read_text()
         self.assertIn('66cc912f6088bc1b929d23ee07fc906b94e82fdd2e747ce6419fb7b2fe3a7b91', source)
         self.assertIn('sha256:70fc84b541c2bffebd8d3130544d98158d25ced0c788890511b7d96a39c50216', source)
+        live = ('d066c3e7d94124efd847310e0d5ae9822401fa2f',
+                'be2c859257c765ff3fdffda4247757328058ec4f3efecd67eb5312cf6f2c8b35',
+                'sha256:c4b2621160a2ecbad49f48d34ee8584a37c300a31aebb5c44658b7cace3048da')
+        self.assertIn(live, release.CENTRAL_PREDECESSORS)
+        self.assertNotIn((live[0], live[1], 'sha256:' + '0' * 64), release.CENTRAL_PREDECESSORS)
 
     def test_preserves_bank_configuration_and_storage(self):
         old = runtime()
