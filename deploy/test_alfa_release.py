@@ -130,5 +130,47 @@ class ReleaseTests(unittest.TestCase):
         self.assertEqual(sum(call[0]=='run' and call[1]=='--rm' for call in calls),1)
 
 
+    def test_stable_health_window_recovers_after_transient_database_busy(self):
+        outcomes = [release.Refused('COMMAND_FAILED'), None, release.Refused('COMMAND_FAILED'),
+                    None, None, None]
+
+        def health(*_):
+            outcome = outcomes.pop(0)
+            if outcome:
+                raise outcome
+
+        def inspect(_):
+            return {'State': {'Running': True}, 'RestartCount': 0}
+
+        with patch.object(release, 'health', health), patch.object(release, 'inspect', inspect), \
+             patch.object(release.time, 'sleep', lambda _: None):
+            release.stable_health_window('candidate', 8081, 0, soak_checks=3,
+                                         recovery_checks=3, required_successes=3)
+        self.assertEqual(outcomes, [])
+
+    def test_stable_health_window_rejects_candidate_that_never_recovers(self):
+        def health(*_):
+            raise release.Refused('COMMAND_FAILED')
+
+        def inspect(_):
+            return {'State': {'Running': True}, 'RestartCount': 0}
+
+        with patch.object(release, 'health', health), patch.object(release, 'inspect', inspect), \
+             patch.object(release.time, 'sleep', lambda _: None):
+            with self.assertRaisesRegex(release.Refused, 'HEALTH_RECOVERY'):
+                release.stable_health_window('candidate', 8081, 0, soak_checks=1,
+                                             recovery_checks=2, required_successes=2)
+
+    def test_stable_health_window_rejects_restart_even_if_health_recovers(self):
+        def inspect(_):
+            return {'State': {'Running': True}, 'RestartCount': 1}
+
+        with patch.object(release, 'health', lambda *_: None), patch.object(release, 'inspect', inspect), \
+             patch.object(release.time, 'sleep', lambda _: None):
+            with self.assertRaisesRegex(release.Refused, 'UNSTABLE_RUNTIME'):
+                release.stable_health_window('candidate', 8081, 0, soak_checks=1,
+                                             recovery_checks=1, required_successes=1)
+
+
 if __name__ == '__main__':
     unittest.main()
