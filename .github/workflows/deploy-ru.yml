@@ -272,6 +272,10 @@ jobs:
           path: alfa-release-${{ github.run_id }}-${{ github.run_attempt }}
           persist-credentials: false
           fetch-depth: 1
+      - name: Provision Node.js 24 for release preflight
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 24
       - name: Verify controller and install exact artifact with retained data
         working-directory: alfa-release-${{ github.run_id }}-${{ github.run_attempt }}
         shell: bash
