@@ -108,10 +108,19 @@ def main():
         '--env','ARTHELLO_OWNER_LOGIN','--env','ARTHELLO_OWNER_PASSWORD',
         '--mount','type=bind,src='+str(ROOT/'deploy')+',dst=/audit,readonly',
         '--entrypoint','node',container['Image'],'/audit/alfa_reconciliation_audit.mjs'],'ALFA_OS_AUDIT=',timeout=900)
+    print('ALFA_OS_RECONCILIATION='+json.dumps(report['os'],ensure_ascii=False),flush=True)
     report['atlasData']=capture(['docker','exec','-i','atlas-school-diary','node','--input-type=module','-'],'DIARY_DATA_AUDIT=',data=(ROOT/'deploy/diary-data-audit.mjs').read_bytes())
+    print('ALFA_ATLAS_DIARY_RECONCILIATION='+json.dumps(report['atlasData'],ensure_ascii=False),flush=True)
     with school_connection() as (execute,inventory):
         report['schoolRuntime']=inventory
         container_id=inventory.get('applicationContainerId','')
+        candidates=inventory.get('candidates',[])
+        print('ALFA_SCHOOL_INVENTORY_SUMMARY='+json.dumps({'status':inventory.get('status'),
+            'reason':inventory.get('reason'), 'candidateCount':len(candidates),
+            'candidateSources':[row.get('source') for row in candidates],
+            'writerCount':sum(bool(row.get('databasePathConfigured')) and row.get('workingDir')=='/app'
+                and any(m.get('destination')=='/data' and m.get('type')=='volume' and m.get('writable')
+                    for m in row.get('dataVolumes',[])) for row in candidates)},ensure_ascii=False),flush=True)
         require(inventory.get('status')=='verified' and re.fullmatch(r'[a-f0-9]{64}',container_id),'SCHOOL_INVENTORY')
         output=execute('docker exec -i '+container_id+' node --input-type=module -',data=(ROOT/'deploy/diary-data-audit.mjs').read_bytes())
         lines=[line[len('DIARY_DATA_AUDIT='):] for line in output.decode().splitlines() if line.startswith('DIARY_DATA_AUDIT=')]
