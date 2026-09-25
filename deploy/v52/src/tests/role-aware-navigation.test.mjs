@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
-import { API_ROLES, API_RULES, APP_ROLE_DEFINITIONS, accessibleModules, canAccessApi, canAccessModule, canManageAccess, permissionForRole, registryCapabilities, resolveModuleRoute } from "../lib/access-policy.ts";
+import { API_ROLES, API_RULES, APP_ROLE_DEFINITIONS, accessibleModules, canAccessApi, canAccessModule, canManageAccess, canManageFamilyDiaryAccess, permissionForRole, registryCapabilities, resolveModuleRoute } from "../lib/access-policy.ts";
 import { moduleCatalog } from "../data/test-snapshot.ts";
 
 const read = (path) => readFile(new URL(path, import.meta.url), "utf8");
@@ -169,6 +169,12 @@ test("proxy, navigation and displayed role matrix share one typed policy", async
   assert.equal(permissionForRole("TEACHER", "clients"), "Нет доступа");
   assert.equal(canManageAccess({ apiRole: "OWNER", isSystemOwner: true }), true);
   assert.equal(canManageAccess({ apiRole: "DIRECTOR", isSystemOwner: false }), false);
+  assert.equal(canManageFamilyDiaryAccess({ apiRole: "OWNER", isSystemOwner: true }), true);
+  assert.equal(canManageFamilyDiaryAccess({ apiRole: "ADMIN", isSystemOwner: false, isAdministrative: true, allowedModules: ["clients"] }), true);
+  assert.equal(canManageFamilyDiaryAccess({ apiRole: "ADMIN", isSystemOwner: false, isAdministrative: false, allowedModules: ["clients"] }), false);
+  assert.equal(canManageFamilyDiaryAccess({ apiRole: "ADMIN", isSystemOwner: false, isAdministrative: true, allowedModules: ["education"] }), false);
+  assert.equal(canManageFamilyDiaryAccess({ apiRole: "HR", isSystemOwner: false, isAdministrative: true, allowedModules: ["clients"] }), false);
+  assert.equal(canAccessModule({ apiRole: "ADMIN", isSystemOwner: false, isAdministrative: true, allowedModules: ["clients"] }, "access"), true);
 
   assert.match(proxy, /from "\.\/lib\/access-policy"/);
   assert.match(shell, /from "\.\.\/\.\.\/lib\/access-policy"/);
