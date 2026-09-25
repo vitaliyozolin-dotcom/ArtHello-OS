@@ -119,6 +119,13 @@ def main():
         print('ALFA_SCHOOL_INVENTORY_SUMMARY='+json.dumps({'status':inventory.get('status'),
             'reason':inventory.get('reason'), 'candidateCount':len(candidates),
             'candidateSources':[row.get('source') for row in candidates],
+            'candidateSignals':[{'workingDir':row.get('workingDir'),
+                'databasePathConfigured':row.get('databasePathConfigured'),
+                'writableDataVolume':any(m.get('destination')=='/data' and m.get('type')=='volume' and m.get('writable')
+                    for m in row.get('dataVolumes',[])),
+                'backupVolumePresent':any(m.get('destination')=='/backups' for m in row.get('dataVolumes',[])),
+                'networkCount':row.get('networkCount'),'portBindingsPresent':row.get('portBindingsPresent')}
+                for row in candidates],
             'writerCount':sum(bool(row.get('databasePathConfigured')) and row.get('workingDir')=='/app'
                 and any(m.get('destination')=='/data' and m.get('type')=='volume' and m.get('writable')
                     for m in row.get('dataVolumes',[])) for row in candidates)},ensure_ascii=False),flush=True)
