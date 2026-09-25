@@ -3,6 +3,7 @@ name: Verify ArtHello v52 release
 on:
   pull_request:
     paths:
+      - deploy/alfa_audit.py
       - .github/workflows/deploy-ru.yml
       - .github/workflows/runner-checkout-space.yml
       - .github/scripts/alfa-source-audit.mjs
@@ -113,6 +114,7 @@ on:
   push:
     branches: [main]
     paths:
+      - deploy/alfa_audit.py
       - .github/workflows/deploy-ru.yml
       - .github/workflows/runner-checkout-space.yml
       - .github/scripts/alfa-source-audit.mjs
