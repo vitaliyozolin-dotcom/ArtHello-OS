@@ -20,6 +20,20 @@ try:
           'entrypointCount':len(config.get('Entrypoint') or []),'commandCount':len(config.get('Cmd') or []),
           'databasePathConfigured':any(v.startswith('DATABASE_PATH=/data/') for v in config.get('Env',[]))})
     writers=[row for row in candidates if row['databasePathConfigured'] and row['workingDir']=='/app' and any(m['destination']=='/data' and m['type']=='volume' and m['writable'] for m in row['dataVolumes'])]
-    print(json.dumps({'status':'verified' if len(writers)==1 else 'blocked','candidates':candidates,'applicationContainerId':writers[0]['containerId'] if len(writers)==1 else None}))
+    stopped=[]
+    for container_id in docker('ps','-aq').decode().split():
+        row=json.loads(docker('inspect',container_id))[0]
+        if row['State']['Running']: continue
+        try: image=json.loads(docker('image','inspect',row['Image']))[0]
+        except Exception: continue
+        source=image.get('Config',{}).get('Labels',{}).get('org.opencontainers.image.revision')
+        if source not in ('54242340f2d9b6a9887d69ecc03520ddf9f7982c','5876accedbdf3758971fdc383f1e0fad8c32a158'): continue
+        stopped.append({'containerId':row['Id'],'image':row['Image'],'source':source,
+            'workingDir':row['Config'].get('WorkingDir') if row['Config'].get('WorkingDir') in ['/app','/school','/'] else 'OTHER',
+            'databasePathConfigured':any(v.startswith('DATABASE_PATH=/data/') for v in row['Config'].get('Env',[])),
+            'dataVolumes':[{'destination':m['Destination'],'writable':m['RW'],'type':m['Type']} for m in row['Mounts'] if m['Destination'] in ['/data','/backups']],
+            'portBindingsPresent':bool(row['HostConfig'].get('PortBindings')),
+            'networkCount':len(row['NetworkSettings']['Networks'])})
+    print(json.dumps({'status':'verified' if len(writers)==1 else 'blocked','candidates':candidates,'applicationContainerId':writers[0]['containerId'] if len(writers)==1 else None,'stoppedCandidates':stopped}))
 except Exception:
     print(json.dumps({'status':'blocked','reason':'REMOTE_INVENTORY_UNCONFIRMED'}))
