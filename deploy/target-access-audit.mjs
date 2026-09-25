@@ -70,7 +70,8 @@ export function summarizeTargetAccess(settings, targetHash = TARGET_DISPLAY_NAME
       role: typeof school?.role === "string" ? school.role : "",
       syncStatus: typeof school?.lastSyncStatus === "string" ? school.lastSyncStatus : "",
     },
-    productionMutations: false,
+    businessDataChanged: false,
+    accessGrantChanged: false,
   };
 }
 
