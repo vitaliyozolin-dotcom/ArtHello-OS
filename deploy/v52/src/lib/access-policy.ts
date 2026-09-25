@@ -238,10 +238,16 @@ export function canAccessModule(context: AccessPolicyContext, moduleId: ModuleId
   // ArtHello Pay is a separate system grant, not a section checkbox. This keeps
   // payment-link operators outside bank balances and statements.
   if (moduleId === "pay") return (context.apiRole === "OWNER" && context.isSystemOwner) || context.canAccessPay === true;
-  // Access management is never an ordinary checkbox. It is exposed only by an
-  // explicit system-owner or family-diary capability. The latter already
-  // verifies that the Clients section itself is assigned.
-  if (moduleId === "access") return canManageAccess(context) || canManageFamilyDiaryAccess(context);
+  // Family diary managers may enter the access shell through their existing
+  // Clients assignment. Canonical owners keep the existing section-assignment
+  // contract: if an explicit module set is present, an unchecked Access section
+  // stays hidden.
+  if (moduleId === "access") {
+    if (canManageAccess(context)) {
+      return context.allowedModules === undefined || context.allowedModules.includes(moduleId);
+    }
+    return canManageFamilyDiaryAccess(context);
+  }
   if (context.allowedModules !== undefined && !context.allowedModules.includes(moduleId)) return false;
   return MODULE_API_REQUIREMENTS[moduleId].every((requirement) => {
     const write = requirement.endsWith("#write");
