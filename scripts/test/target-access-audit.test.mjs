@@ -26,7 +26,8 @@ test("target access audit reports family/student capabilities and Atlas diary gr
   assert.equal(result.familyDiaryAccessManagement, true);
   assert.deepEqual(result.atlasDiary, { active: true, role: "admin", loginMode: "Вход через ArtHello OS" });
   assert.equal(result.schoolDiary.active, false);
-  assert.equal(result.productionMutations, false);
+  assert.equal(result.businessDataChanged, false);
+  assert.equal(result.accessGrantChanged, false);
 });
 
 test("target access audit fails closed when the account identity is ambiguous", () => {
