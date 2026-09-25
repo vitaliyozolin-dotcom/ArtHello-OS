@@ -27,6 +27,8 @@ test("access UI exposes safe lifecycle and server authorization boundary", async
   assert.match(workspace, /История и связанные записи сохранятся/);
   assert.match(workspace, /каждое чтение и изменение обязано повторно проверяться на сервере/i);
   assert.match(api, /requireOwner\(canManage\)/);
+  assert.match(api, /requireFamilyAccessManager\(canManageFamilyAccess\)/);
+  assert.match(api, /canManageFamilyDiaryAccess\(authenticated\.auth\.user\)/);
   assert.match(api, /isCanonicalOwnerContext\(authenticated\)/);
   assert.match(api, /accessHistory/);
   assert.match(api, /like\(auditEvents\.action, "settings\.%"\)/);

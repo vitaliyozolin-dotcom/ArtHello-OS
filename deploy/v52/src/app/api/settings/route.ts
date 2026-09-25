@@ -7,7 +7,7 @@ import { getRequestUser } from "../../../lib/request-user";
 import { batchChangeCount } from "../../../lib/access-sync-outbox";
 import { dispatchFamilyDiaryAccessEvent, type FamilyAccessEvent, prepareFamilyDiaryAccessEvent, type PreparedFamilyAccessSyncEvent } from "../../../lib/family-access-sync";
 import { dispatchSchoolDiaryAccessEvent, prepareSchoolDiaryAccessEvent, type PreparedStaffAccessSyncEvent, SCHOOL_SYSTEM_ID, type StaffAccessEvent, type StaffSyncResult } from "../../../lib/staff-access-sync";
-import { API_ROLE_BY_APP_ROLE, ASSIGNABLE_APP_ROLES, canAccessModule, canManageAccess } from "../../../lib/access-policy";
+import { API_ROLE_BY_APP_ROLE, ASSIGNABLE_APP_ROLES, canAccessModule, canManageAccess, canManageFamilyDiaryAccess } from "../../../lib/access-policy";
 import { getAuthenticatedRequestContext, isCanonicalOwnerContext, PAY_SYSTEM_ID, verifyAuthenticatedRequestCsrf } from "../../../lib/production-auth";
 import { hasTrustedMutationOrigin } from "../../../lib/request-security";
 import { safeSettingsActionError } from "../../../lib/settings-error";
@@ -64,8 +64,9 @@ export async function GET(request: Request) {
     if (!me || me.status === "Доступ приостановлен") return Response.json({ error: "Доступ ещё не активирован владельцем" }, { status: 403 });
     const authenticated = await getAuthenticatedRequestContext(request);
     const canManage = Boolean(authenticated && isCanonicalOwnerContext(authenticated));
+    const canManageFamilyAccess = Boolean(authenticated && canManageFamilyDiaryAccess(authenticated.auth.user));
     if (new URL(request.url).searchParams.get("section") === "families") {
-      if (!canManage) return Response.json({ error: "Нет прав на каталог семей" }, { status: 403 });
+      if (!canManageFamilyAccess) return Response.json({ error: "Нет прав на каталог семей" }, { status: 403 });
       const familyPage = await loadFamilyDirectoryPage(request);
       return Response.json({
         ...familyPage,
@@ -134,6 +135,7 @@ export async function GET(request: Request) {
         ],
       },
       canManage,
+      canManageFamilyAccess,
       authBoundary: "ArtHello OS — единый источник сотрудников, семей, родителей, учеников, классов и прав входа. AlfaCRM передаёт исходные записи через защищённое подключение, ArtHello OS присваивает постоянный внутренний номер, а дневник получает только нужные учебному контуру данные. Внутри дневника ничего из этого повторно не создаётся.",
     });
   } catch {
@@ -154,6 +156,7 @@ export async function POST(request: Request) {
     const me = await ensureUser(actor);
     if (!me || me.status === "Доступ приостановлен") return Response.json({ error: "Доступ не активирован" }, { status: 403 });
     const canManage = canManageAccess(authenticated.auth.user);
+    const canManageFamilyAccess = canManageFamilyDiaryAccess(authenticated.auth.user);
     const body = await request.json() as Record<string, unknown>;
     const action = clean(body.action, 50);
 
@@ -537,7 +540,7 @@ export async function POST(request: Request) {
     }
 
     if (action === "grantFamilyAccess") {
-      requireOwner(canManage);
+      requireFamilyAccessManager(canManageFamilyAccess);
       const familyEntityId = clean(body.familyEntityId, 80);
       const principalEntityId = clean(body.principalEntityId, 80);
       const role = clean(body.role, 20);
@@ -617,7 +620,7 @@ export async function POST(request: Request) {
     }
 
     if (["blockFamilyAccess", "restoreFamilyAccess", "resetFamilyPassword", "revokeFamilyAccess"].includes(action)) {
-      requireOwner(canManage);
+      requireFamilyAccessManager(canManageFamilyAccess);
       const grantId = clean(body.grantId, 100);
       const [current] = await db.select().from(familySystemAccess).where(eq(familySystemAccess.id, grantId)).limit(1);
       if (!current) return Response.json({ error: "Доступ не найден" }, { status: 404 });
@@ -1065,6 +1068,7 @@ async function assertSameOriginMutation(request: Request) {
 }
 
 function requireOwner(value: boolean) { if (!value) throw new Error("Нет прав: изменять доступы и системные настройки может только собственник"); }
+function requireFamilyAccessManager(value: boolean) { if (!value) throw new Error("Нет прав: выдавать доступ к дневнику могут только уполномоченные администраторы клиентского контура"); }
 function clean(value: unknown, max: number) { return typeof value === "string" ? value.trim().slice(0, max) : ""; }
 function boundedInteger(value: string | null, fallback: number, minimum: number, maximum: number) {
   const parsed = Number.parseInt(value ?? "", 10);

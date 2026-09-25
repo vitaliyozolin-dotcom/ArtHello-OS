@@ -11,6 +11,7 @@ export type ApiRole = (typeof API_ROLES)[number];
 export type AccessPolicyContext = {
   apiRole: string;
   isSystemOwner: boolean;
+  isAdministrative?: boolean;
   canAccessMedical?: boolean;
   canAccessPay?: boolean;
   /** Undefined keeps the legacy role template; an array is the owner's explicit section assignment. */
@@ -237,11 +238,17 @@ export function canAccessModule(context: AccessPolicyContext, moduleId: ModuleId
   // ArtHello Pay is a separate system grant, not a section checkbox. This keeps
   // payment-link operators outside bank balances and statements.
   if (moduleId === "pay") return (context.apiRole === "OWNER" && context.isSystemOwner) || context.canAccessPay === true;
+  // Family diary managers may enter the access shell through their existing
+  // Clients assignment. Canonical owners keep the existing section-assignment
+  // contract: if an explicit module set is present, an unchecked Access section
+  // stays hidden.
+  if (moduleId === "access") {
+    if (canManageAccess(context)) {
+      return context.allowedModules === undefined || context.allowedModules.includes(moduleId);
+    }
+    return canManageFamilyDiaryAccess(context);
+  }
   if (context.allowedModules !== undefined && !context.allowedModules.includes(moduleId)) return false;
-  // The settings endpoint also accepts a narrowly scoped self-service favorites
-  // mutation. That must never make the access-management screen available to a
-  // non-owner role.
-  if (moduleId === "access") return canManageAccess(context);
   return MODULE_API_REQUIREMENTS[moduleId].every((requirement) => {
     const write = requirement.endsWith("#write");
     return canAccessApi(context, write ? requirement.slice(0, -6) : requirement, write ? "POST" : "GET");
@@ -269,6 +276,16 @@ export function registryCapabilities(context: AccessPolicyContext): RegistryCapa
 
 export function canManageAccess(context: AccessPolicyContext) {
   return context.apiRole === "OWNER" && context.isSystemOwner;
+}
+
+/**
+ * Family/parent diary access is an operational client-card capability, not a
+ * system-administration capability. Administrative users may manage it only
+ * when their role is already allowed to edit families in the Clients section.
+ */
+export function canManageFamilyDiaryAccess(context: AccessPolicyContext) {
+  if (canManageAccess(context)) return true;
+  return context.isAdministrative === true && canAccessApi(context, "/api/families", "PATCH");
 }
 
 export function permissionForRole(apiRole: ApiRole, moduleId: ModuleId): RolePermission {
