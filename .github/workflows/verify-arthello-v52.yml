@@ -113,6 +113,7 @@ on:
       - scripts/test/school-sso-fingerprint-r5-docker-check.py
   push:
     branches: [main]
+    paths: ['**']
 
 permissions:
   contents: read
