@@ -676,11 +676,6 @@ export async function POST(request: Request) {
         .where(and(eq(accessSyncEvents.id, eventId), eq(accessSyncEvents.systemId, SCHOOL_SYSTEM_ID)))
         .limit(1);
       if (!event) return Response.json({ error: "Событие синхронизации не найдено" }, { status: 404 });
-      if (familyAccessEvents.has(event.eventType as FamilyAccessEvent)) {
-        requireFamilyAccessManager(canManageFamilyAccess);
-      } else {
-        requireOwner(canManage);
-      }
       const result = familyAccessEvents.has(event.eventType as FamilyAccessEvent)
         ? await dispatchFamilyDiaryAccessEvent(eventId)
         : await dispatchSchoolDiaryAccessEvent(eventId);
