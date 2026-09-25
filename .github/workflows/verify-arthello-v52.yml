@@ -113,7 +113,10 @@ on:
       - scripts/test/school-sso-fingerprint-r5-docker-check.py
   push:
     branches: [main]
-    paths: ['**']
+    paths:
+      - '**'
+      - .github/scripts/alfa-source-audit.mjs
+      - scripts/test/alfa-source-transport-audit.test.mjs
 
 permissions:
   contents: read
