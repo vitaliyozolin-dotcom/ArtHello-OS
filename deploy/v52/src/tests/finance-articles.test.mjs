@@ -79,3 +79,13 @@ test('positive-amount P&L model rejects a new income assignment to an outflow', 
   catalog = approve(create(catalog, { report: 'pnl', name: 'Выручка', direction: 'Поступление' }, 'b'), 'b');
   assert.throws(() => validateClassification(catalog, operation, { ...allocation, pnlArticle: 'Выручка', reportClass: 'Доходы ОПиУ', accrualPeriod: '2026-09' }), /направлен/);
 });
+
+test('financing and internal transfers cannot be classified as profit or loss', () => {
+  for (const group of ['financing', 'internal']) {
+    let catalog = approve(create(emptyCatalog(), { name: 'Получение займа', direction: 'Поступление', group }));
+    catalog = approve(create(catalog, { report: 'pnl', name: 'Прочая выручка', direction: 'Поступление' }, 'b'), 'b');
+    const incoming = { ...operation, direction: 'Поступление' };
+    assert.throws(() => validateClassification(catalog, incoming, { ...allocation, cashflowArticle: 'Получение займа', pnlArticle: 'Прочая выручка', reportClass: 'Доходы ОПиУ', accrualPeriod: '2026-09' }), /ОПиУ/);
+    assert.equal(validateClassification(catalog, incoming, { ...allocation, cashflowArticle: 'Получение займа' }).reportClass, 'Не включено в ОПиУ');
+  }
+});

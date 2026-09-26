@@ -12,8 +12,8 @@ export type FinanceAutoAllocationInput = {
 export type FinanceAutoAllocation = {
   objectEntityId: "BR-ATLAS-SCHOOL" | "BR-KINDERGARTEN";
   cashflowArticle: "Оплата школы" | "Оплата детского сада";
-  pnlArticle: "Выручка школы" | "Выручка детского сада";
-  reportClass: "Доходы ОПиУ";
+  pnlArticle: "";
+  reportClass: "Не включено в ОПиУ";
   accrualPeriod: string;
   status: "Разнесено автоматически";
 };
@@ -27,9 +27,7 @@ const normalize = (value: string) => value
 
 const articleRequirements = [
   ["cashflow", "Поступление", "Оплата школы"],
-  ["pnl", "Поступление", "Выручка школы"],
   ["cashflow", "Поступление", "Оплата детского сада"],
-  ["pnl", "Поступление", "Выручка детского сада"],
 ] as const;
 
 export function isAutoAllocationCatalogReady(catalog: ArticleCatalog) {
@@ -51,16 +49,16 @@ export function classifyFinanceOperation(input: FinanceAutoAllocationInput): Fin
   return school ? {
     objectEntityId: "BR-ATLAS-SCHOOL",
     cashflowArticle: "Оплата школы",
-    pnlArticle: "Выручка школы",
-    reportClass: "Доходы ОПиУ",
-    accrualPeriod: input.operationDate.slice(0, 7),
+    pnlArticle: "",
+    reportClass: "Не включено в ОПиУ",
+    accrualPeriod: "",
     status: "Разнесено автоматически",
   } : {
     objectEntityId: "BR-KINDERGARTEN",
     cashflowArticle: "Оплата детского сада",
-    pnlArticle: "Выручка детского сада",
-    reportClass: "Доходы ОПиУ",
-    accrualPeriod: input.operationDate.slice(0, 7),
+    pnlArticle: "",
+    reportClass: "Не включено в ОПиУ",
+    accrualPeriod: "",
     status: "Разнесено автоматически",
   };
 }
