@@ -2945,6 +2945,52 @@ export async function commitTochkaReadOnlySync(
     accrualPeriod?: string;
     status: string;
   };
+  // D248: provider identity owns bank facts; manual allocation owns finance fields.
+  // Inspect every row before applying any account/statement facts. Financial
+  // reversals and ambiguous identities require review instead of silent replay.
+  const inputReceivedCount = sync.accounts.length + sync.statements.length + sync.transactions.length;
+  const previousById = new Map<string, Record<string, unknown>>();
+  const reviewRows: Array<{ id: string; before: unknown; after: unknown }> = [];
+  const seen = new Map<string, string>();
+  const seenPayments = new Map<string, { id: string; derived: boolean }>();
+  for (const transaction of sync.transactions) {
+    const previous = await env.DB.prepare("SELECT * FROM bank_transactions WHERE id=?")
+      .bind(transaction.id).first<Record<string, unknown>>();
+    if (previous) previousById.set(transaction.id, previous);
+    const duplicatePayload = seen.get(transaction.id);
+    seen.set(transaction.id, JSON.stringify(transaction));
+    const paymentKey = JSON.stringify([transaction.accountId, transaction.paymentId, transaction.direction]);
+    const earlierPayment = transaction.paymentId ? seenPayments.get(paymentKey) : undefined;
+    const derived = transaction.providerTransactionId.startsWith("DERIVED-");
+    if (transaction.paymentId) seenPayments.set(paymentKey, { id: transaction.id, derived: derived || Boolean(earlierPayment?.derived) });
+    const ambiguousBatch = earlierPayment && earlierPayment.id !== transaction.id && (derived || earlierPayment.derived);
+    const ambiguous = transaction.paymentId ? await env.DB.prepare(`SELECT id FROM bank_transactions
+      WHERE connection_id=? AND provider_account_id=? AND payment_id=? AND direction=? AND id!=?
+      AND (provider_transaction_id LIKE 'DERIVED-%' OR ? LIKE 'DERIVED-%') LIMIT 1`)
+      .bind(setup.connectionId, transaction.accountId, transaction.paymentId, transaction.direction,
+        transaction.id, transaction.providerTransactionId).first<{ id: string }>() : null;
+    const changedFinancialFact = previous && (
+      previous.connection_id !== setup.connectionId || previous.legal_entity_id !== setup.legalEntityId ||
+      previous.provider_account_id !== transaction.accountId || previous.provider_transaction_id !== transaction.providerTransactionId ||
+      previous.amount_minor !== transaction.amountMinor || previous.operation_date !== transaction.operationDate ||
+      previous.direction !== transaction.direction || previous.currency !== transaction.currency ||
+      (String(previous.status).toLowerCase() === "booked" && transaction.status.toLowerCase() !== "booked")
+    );
+    if (changedFinancialFact || ambiguous || ambiguousBatch || (duplicatePayload && duplicatePayload !== JSON.stringify(transaction))) {
+      reviewRows.push({ id: transaction.id, before: previous ?? ambiguous, after: transaction });
+    }
+  }
+  const reviewRequired = reviewRows.length > 0;
+  if (reviewRequired) {
+    for (const row of reviewRows) await env.DB.batch([
+      env.DB.prepare(`INSERT INTO audit_events (actor,action,entity_type,entity_id,payload)
+        SELECT ?,'integration.tochka_transaction_review_required','bank_transaction',?,? WHERE ${guard}`)
+        .bind(actor, row.id, JSON.stringify({ runId, ...row }), ...guardBindings),
+    ]);
+    sync = { ...sync, accounts: [], statements: [], transactions: [], complete: false,
+      rejectedCount: sync.rejectedCount + reviewRows.length,
+      reason: "Изменились финансовые поля или идентификатор банковской операции. Требуется сверка; этот пакет не применён. Подробности сохранены в истории." };
+  }
   const projectedByTransaction = new Map<string, ProjectedOperation>();
   for (const transaction of sync.transactions) {
     if (transaction.operationDate < FINANCE_ACCOUNTING_START_DATE) continue;
@@ -3015,7 +3061,13 @@ export async function commitTochkaReadOnlySync(
   const transactionStatements = sync.transactions.map((transaction) => env.DB.prepare(`INSERT INTO bank_transactions
     (id,connection_id,legal_entity_id,provider_account_id,provider_statement_id,provider_transaction_id,payment_id,operation_date,direction,amount_minor,currency,status,document_number,transaction_type,description,counterparty_name,counterparty_inn,counterparty_kpp,source_payload_hash,financial_operation_id,imported_at)
     SELECT ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,? WHERE ${guard}
-    ON CONFLICT(id) DO NOTHING`)
+    ON CONFLICT(id) DO UPDATE SET
+      provider_statement_id=excluded.provider_statement_id,payment_id=excluded.payment_id,status=excluded.status,
+      document_number=excluded.document_number,transaction_type=excluded.transaction_type,
+      description=excluded.description,counterparty_name=excluded.counterparty_name,
+      counterparty_inn=excluded.counterparty_inn,counterparty_kpp=excluded.counterparty_kpp,
+      source_payload_hash=excluded.source_payload_hash,
+      financial_operation_id=CASE WHEN excluded.financial_operation_id='' THEN bank_transactions.financial_operation_id ELSE excluded.financial_operation_id END`)
     .bind(
       transaction.id,
       setup.connectionId,
@@ -3040,7 +3092,7 @@ export async function commitTochkaReadOnlySync(
       occurredAt,
       ...guardBindings,
     ));
-  const financialStatements = [...projectedByTransaction.values()].map((operation) => env.DB.prepare(`INSERT INTO financial_operations
+  const financialStatements = new Map([...projectedByTransaction.entries()].map(([transactionId, operation]) => [transactionId, env.DB.prepare(`INSERT INTO financial_operations
     (id,operation_date,period,direction,amount_minor,category,cashflow_article,pnl_article,report_class,accrual_period,counterparty_entity_id,contract_id,document_id,project_entity_id,legal_entity_id,object_entity_id,cfr_entity_id,bank_operation_ref,operation_kind,source_system,source_file,source_sheet,source_ref,data_quality,status,created_by)
     SELECT ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,? WHERE ${guard}
     ON CONFLICT(id) DO NOTHING`)
@@ -3072,24 +3124,45 @@ export async function commitTochkaReadOnlySync(
       operation.status,
       operation.createdBy,
       ...guardBindings,
-    ));
+    )] as const));
 
-  for (const statements of [accountStatements, statementStatements, transactionStatements]) {
+  for (const statements of [accountStatements, statementStatements]) {
     for (let index = 0; index < statements.length; index += 40) {
       await env.DB.batch(statements.slice(index, index + 40));
     }
   }
   let financialOperationCount = 0;
-  for (let index = 0; index < financialStatements.length; index += 40) {
-    const results = await env.DB.batch(financialStatements.slice(index, index + 40));
-    financialOperationCount += results.reduce(
-      (total, result) => total + Number((result as { meta?: { changes?: number } })?.meta?.changes ?? 0),
-      0,
-    );
+  const appliedIds = new Set<string>();
+  // Keep each observation/history/projection unit within a single bounded batch.
+  for (let offset = 0; offset < sync.transactions.length; offset += 12) {
+    const batch: D1PreparedStatement[] = [];
+    const financialIndexes: number[] = [];
+    for (let index = offset; index < Math.min(offset + 12, sync.transactions.length); index += 1) {
+      const transaction = sync.transactions[index];
+      if (appliedIds.has(transaction.id)) continue;
+      appliedIds.add(transaction.id);
+      const previous = previousById.get(transaction.id);
+      const changed = previous && (previous.source_payload_hash !== transaction.sourcePayloadHash ||
+        previous.status !== transaction.status || previous.description !== transaction.description ||
+        (!previous.financial_operation_id && projectedByTransaction.has(transaction.id)));
+      if (changed) batch.push(env.DB.prepare(`INSERT INTO audit_events (actor,action,entity_type,entity_id,payload)
+        SELECT ?,'integration.tochka_transaction_refreshed','bank_transaction',?,? WHERE ${guard}`)
+        .bind(actor, transaction.id, JSON.stringify({ runId, before: previous, after: transaction }), ...guardBindings));
+      batch.push(transactionStatements[index]);
+      const financialInsert = financialStatements.get(transaction.id);
+      if (financialInsert) {
+        financialIndexes.push(batch.length);
+        batch.push(financialInsert);
+      }
+    }
+    if (batch.length) {
+      const results = await env.DB.batch(batch);
+      for (const index of financialIndexes) financialOperationCount += Number((results[index] as { meta?: { changes?: number } })?.meta?.changes ?? 0);
+    }
   }
 
-  const receivedCount = sync.accounts.length + sync.statements.length + sync.transactions.length;
-  const acceptedCount = Math.max(0, receivedCount - sync.rejectedCount);
+  const receivedCount = inputReceivedCount;
+  const acceptedCount = reviewRequired ? 0 : Math.max(0, receivedCount - sync.rejectedCount);
   const nextSyncAt = new Date(Date.now() + Math.max(60, setup.syncIntervalMinutes || 60) * 60_000).toISOString();
   const runStatus = sync.valid && sync.complete && sync.rejectedCount === 0 ? "Успешно" : sync.rejectedCount > 0 ? "Требует проверки" : sync.valid ? "Ожидание банка" : "Ошибка";
   const checkpoint = `accounts:${sync.accounts.length};statements:${sync.statements.length};transactions:${sync.transactions.length}`;
@@ -3108,9 +3181,9 @@ export async function commitTochkaReadOnlySync(
         acceptedCount,
         sync.rejectedCount,
         sync.valid ? 0 : 1,
-        0,
+        reviewRows.length,
         checkpoint,
-        sync.valid ? "" : sync.reason,
+        reviewRequired || !sync.valid ? sync.reason : "",
         actor,
         correlationId,
         0,
@@ -3122,20 +3195,20 @@ export async function commitTochkaReadOnlySync(
       .bind(
         runId,
         setup.connectionId,
-        sync.valid ? "INFO" : "ERROR",
-        sync.complete ? "tochka.statements_imported" : "tochka.statements_pending",
+        reviewRequired ? "WARN" : sync.valid ? "INFO" : "ERROR",
+        reviewRequired ? "tochka.statements_review_required" : sync.complete ? "tochka.statements_imported" : "tochka.statements_pending",
         sync.reason,
         checkpoint,
         ...guardBindings,
       ),
     env.DB.prepare(`UPDATE integration_connections SET
       status=?,auth_status=?,credential_expires_at=?,last_success_at=COALESCE(NULLIF(?,''),last_success_at),next_sync_at=?,
-      received_count=?,accepted_count=?,rejected_count=?,error_count=?,conflict_count=0,
+      received_count=?,accepted_count=?,rejected_count=?,error_count=?,conflict_count=?,
       verified_transfer=?,is_enabled=?,updated_at=?
       WHERE id=? AND ${guard}`)
       .bind(
         !sync.valid ? "Ошибка подключения" : sync.rejectedCount > 0 ? "Требует проверки" : sync.complete ? "Работает" : "Формируются выписки",
-        !sync.valid ? "Ключ сохранён · загрузка из Точки не выполнена" : sync.complete ? "Ключ принят · счета, выписки и операции загружены" : "Ключ принят · Точка формирует выписки",
+        reviewRequired ? "Ключ принят · банковские изменения требуют сверки" : !sync.valid ? "Ключ сохранён · загрузка из Точки не выполнена" : sync.complete ? "Ключ принят · счета, выписки и операции загружены" : "Ключ принят · Точка формирует выписки",
         sync.expiresAt,
         sync.valid && sync.complete && sync.rejectedCount === 0 ? occurredAt : "",
         nextSyncAt,
@@ -3143,6 +3216,7 @@ export async function commitTochkaReadOnlySync(
         acceptedCount,
         sync.rejectedCount,
         sync.valid ? 0 : 1,
+        reviewRows.length,
         sync.valid && sync.complete && sync.rejectedCount === 0 && sync.statements.length > 0 ? 1 : 0,
         sync.valid ? 1 : 0,
         occurredAt,
@@ -3173,6 +3247,7 @@ export async function commitTochkaReadOnlySync(
     committed: Number(connectionResult?.meta?.changes ?? 0) > 0,
     runId,
     financialOperationCount,
+    reviewRequired,
   };
 }
 

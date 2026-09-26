@@ -383,6 +383,7 @@ async function recordTochkaSync(actor: string, setup: IntegrationSetup, trigger:
   if (!commit.committed) {
     return privateJson({ error: "Банковский ключ или настройка изменились во время проверки. Запустите проверку заново." }, 409);
   }
+  if (commit.reviewRequired) return privateJson({ error: "Изменились финансовые поля или идентификатор банковской операции. Пакет не применён; требуется сверка. Подробности — в истории интеграции." }, 409);
   if (!sync.valid) return privateJson({ error: sync.reason }, 422);
   if (sync.rejectedCount === 0) await runTochkaSyncStage('statement_acknowledge', () => statementState.complete(sync.statements), observe);
   return privateJson({

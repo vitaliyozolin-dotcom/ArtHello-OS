@@ -3,6 +3,7 @@ export type BankFactRow = {
   direction: string;
   amountMinor: number;
   currency: string;
+  status?: string;
 };
 
 export type BankPeriodSummary = {
@@ -24,7 +25,7 @@ export function bankOperationPeriod(operationDate: string) {
 }
 
 export function summarizeBankPeriod<T extends BankFactRow>(rows: readonly T[], period: string): BankPeriodSummary {
-  const selected = rows.filter((row) => bankOperationPeriod(row.operationDate) === period && row.currency === "RUB");
+  const selected = rows.filter((row) => bankOperationPeriod(row.operationDate) === period && row.currency === "RUB" && row.status?.toLowerCase() === "booked");
   const incomingMinor = selected
     .filter((row) => isIncomingBankDirection(row.direction))
     .reduce((sum, row) => sum + Math.abs(Number(row.amountMinor)), 0);

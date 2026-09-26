@@ -1571,3 +1571,98 @@ test("Tochka verification commits actual statements and financial operations", a
   assert.match(discovery, /добавлено в финансовый реестр/i);
   assert.match(integrationsApi, /bankSnapshot/);
 });
+
+test("Tochka refresh promotes pending facts, preserves allocation and rejects ambiguous changes", async () => {
+  const database = new CredentialD1Database();
+  createCredentialSchema(database);
+  createBankSyncSchema(database);
+  const dbModule = await loadCredentialDbModule(database);
+  const token = makeJwt({ iss: "statement-import" });
+  try {
+    const setup = await dbModule.saveTochkaSetupWithCredential(
+      "OWNER-LIVE", credentialSetup("ORG-LIVE-1", "customer-one"), token, null,
+    );
+    assert.ok(setup);
+    const accountId = "40817810802000000008/044525104";
+    const transactions = [
+      { providerTransactionId: "tx-credit-1", direction: "Поступление", amountMinor: 12055, counterpartyName: "ООО Родитель" },
+      { providerTransactionId: "tx-debit-1", direction: "Списание", amountMinor: 5000, counterpartyName: "ООО Арендодатель" },
+    ].map((transaction, index) => ({
+      id: `TOCHKA-TX-${index + 1}`,
+      paymentId: `payment-${index + 1}`,
+      statementId: "statement-001",
+      accountId,
+      operationDate: `2026-09-0${index + 2}`,
+      currency: "RUB",
+      status: "Booked",
+      documentNumber: String(101 + index),
+      transactionType: "Платежное поручение",
+      description: index ? "Оплата аренды" : "Оплата по договору 12",
+      counterpartyInn: index ? "7701000002" : "7701000001",
+      counterpartyKpp: index ? "" : "770101001",
+      sourcePayloadHash: `hash-${index + 1}`,
+      ...transaction,
+    }));
+    const sync = {
+      valid: true,
+      complete: true,
+      reason: "Счета, остатки, выписки и операции загружены из Точки",
+      expiresAt: new Date(fixedNow + 3_600_000).toISOString(),
+      customerCode: "customer-one",
+      accounts: [{ id: "TOCHKA-ACC-1", accountId, maskedAccount: "•• 0008", name: "Основной счёт", currency: "RUB", status: "Enabled" }],
+      statements: [{
+        id: "TOCHKA-STMT-1", statementId: "statement-001", accountId, status: "Ready",
+        startDate: "2026-09-01", endDate: "2026-09-03", startBalanceMinor: 10000,
+        endBalanceMinor: 17055, currency: "RUB", transactionCount: transactions.length,
+      }],
+      transactions,
+      rejectedCount: 0,
+    };
+
+    const statementState = await dbModule.openTochkaStatementState(setup);
+    assert.ok(statementState);
+    sync.transactions[1].status = "Pending";
+    await dbModule.commitTochkaReadOnlySync("OWNER-LIVE", setup, sync, "Первичная загрузка", statementState.fence);
+    assert.equal(database.database.prepare("SELECT count(*) n FROM financial_operations").get().n, 1);
+    database.database.prepare("UPDATE financial_operations SET category='Аренда',status='Разнесено',cashflow_article='Аренда',accrual_period='2026-10'").run();
+    sync.transactions[1].status = "Booked";
+    sync.transactions[0].description = "Уточнённое назначение";
+    sync.transactions[0].sourcePayloadHash = "revised-hash";
+    database.database.exec("CREATE TRIGGER reject_finance BEFORE INSERT ON financial_operations WHEN NEW.direction='Списание' BEGIN SELECT RAISE(ABORT,'synthetic finance storage failure'); END");
+    await assert.rejects(dbModule.commitTochkaReadOnlySync("OWNER-LIVE", setup, sync, "Ошибка хранения", statementState.fence), /synthetic finance storage failure/);
+    assert.equal(database.database.prepare("SELECT status FROM bank_transactions WHERE id='TOCHKA-TX-2'").get().status, 'Pending');
+    database.database.exec("DROP TRIGGER reject_finance");
+    const updated = await dbModule.commitTochkaReadOnlySync("OWNER-LIVE", setup, sync, "Уточнение", statementState.fence);
+    assert.equal(updated.financialOperationCount, 1);
+    const credit = database.database.prepare("SELECT * FROM bank_transactions WHERE id='TOCHKA-TX-1'").get();
+    assert.equal(credit.description, "Уточнённое назначение");
+    const debit = database.database.prepare("SELECT * FROM bank_transactions WHERE id='TOCHKA-TX-2'").get();
+    assert.equal(debit.status, "Booked");
+    assert.ok(debit.financial_operation_id);
+    const allocated = database.database.prepare("SELECT category,status,cashflow_article,accrual_period FROM financial_operations WHERE id=?").get(credit.financial_operation_id);
+    assert.deepEqual({...allocated},{category:'Аренда',status:'Разнесено',cashflow_article:'Аренда',accrual_period:'2026-10'});
+    assert.equal(database.database.prepare("SELECT count(*) n FROM audit_events WHERE action='integration.tochka_transaction_refreshed'").get().n, 2);
+    await dbModule.commitTochkaReadOnlySync("OWNER-LIVE", setup, sync, "Повтор", statementState.fence);
+    assert.equal(database.database.prepare("SELECT count(*) n FROM audit_events WHERE action='integration.tochka_transaction_refreshed'").get().n, 2);
+    const changed = structuredClone(sync);
+    changed.transactions[0].amountMinor += 1;
+    const review = await dbModule.commitTochkaReadOnlySync("OWNER-LIVE", setup, changed, "Другая сумма", statementState.fence);
+    assert.equal(review.reviewRequired, true);
+    assert.equal(database.database.prepare("SELECT amount_minor FROM bank_transactions WHERE id='TOCHKA-TX-1'").get().amount_minor, 12055);
+    assert.equal(database.database.prepare("SELECT verified_transfer FROM integration_connections WHERE id='INT-T-TOCHKA'").get().verified_transfer, 0);
+    const duplicate = structuredClone(sync);
+    duplicate.transactions[0].id = 'TOCHKA-TX-NEW';
+    duplicate.transactions[0].providerTransactionId = 'DERIVED-NEW';
+    const ambiguous = await dbModule.commitTochkaReadOnlySync("OWNER-LIVE", setup, duplicate, "Сменившийся ключ", statementState.fence);
+    assert.equal(ambiguous.reviewRequired, true);
+    assert.equal(database.database.prepare("SELECT count(*) n FROM bank_transactions").get().n, 2);
+    const reversed = structuredClone(sync);
+    reversed.transactions[0].status = 'Pending';
+    assert.equal((await dbModule.commitTochkaReadOnlySync("OWNER-LIVE", setup, reversed, "Отмена", statementState.fence)).reviewRequired, true);
+    await statementState.release();
+  } finally {
+    delete globalThis.__ARTHELLO_TOCHKA_DB_ENV__;
+    delete globalThis.__ARTHELLO_TOCHKA_DB_PROJECT__;
+    database.close();
+  }
+});
