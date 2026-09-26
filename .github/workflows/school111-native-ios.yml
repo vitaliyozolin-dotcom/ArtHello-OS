@@ -1,0 +1,136 @@
+name: School111 native iOS candidate
+on:
+  push:
+    branches: [build/school111-native-ios-20260926]
+    paths: [mobile/school111/**, .github/workflows/school111-native-ios.yml]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: school111-native-candidate-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  ios:
+    runs-on: macos-26
+    timeout-minutes: 40
+    env:
+      CI: '1'
+      EXPO_NO_TELEMETRY: '1'
+      EXPO_PUBLIC_API_ORIGIN: https://school-188-225-38-55.sslip.io
+      EXPO_PUBLIC_MOBILE_SERVICES: 'false'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          sparse-checkout: mobile/school111
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Verify and materialize source
+        run: |
+          python3 - <<'PY'
+          import pathlib,hashlib,lzma,json
+          base=pathlib.Path('mobile/school111')
+          pieces=sorted(base.glob('source.part-*'))
+          assert len(pieces)==5
+          packed=b''.join(p.read_bytes() for p in pieces)
+          assert hashlib.sha256(packed).hexdigest()=='eaa2985bad3525fa80da2919023b2fe84abe8e0774a7a6efa7d2f0c31b760cf8'
+          raw=lzma.decompress(packed)
+          assert hashlib.sha256(raw).hexdigest()=='c9b54acf89706ebf4b9612c8f2fb044b0d9af9ea545597b44ba665b81a8743f1'
+          files=json.loads(raw);assert len(files)==38
+          root=pathlib.Path('native-app');root.mkdir()
+          for name,content in files.items():
+            p=pathlib.PurePosixPath(name)
+            assert not p.is_absolute() and '..' not in p.parts and isinstance(content,str)
+            target=root/name;target.parent.mkdir(parents=True,exist_ok=True);target.write_text(content)
+          (root/'proof').mkdir(exist_ok=True)
+          (root/'preview').mkdir(exist_ok=True)
+          (root/'proof/source-provenance.json').write_text(json.dumps({'packed_sha256':hashlib.sha256(packed).hexdigest(),'decoded_sha256':hashlib.sha256(raw).hexdigest(),'files':len(files)},indent=2))
+          PY
+      - name: Install candidate and generate existing-logo asset
+        working-directory: native-app
+        run: |
+          set -o pipefail
+          npm install --ignore-scripts --no-audit --no-fund 2>&1 | tee proof/install.log
+          node -e 'const sharp=require("sharp");sharp("assets/school-logo.svg").resize(768,768).png().toBuffer().then(x=>sharp({create:{width:1024,height:1024,channels:3,background:"#F8F7F4"}}).composite([{input:x,left:128,top:128}]).png().toFile("assets/app-icon-1024.png"))'
+          npm run format > proof/format.log
+      - name: Type, logic and dependency checks
+        working-directory: native-app
+        run: |
+          set -o pipefail
+          npm run typecheck 2>&1 | tee proof/typecheck.log
+          npm test 2>&1 | tee proof/unit-tests.log
+          npm run test:backend 2>&1 | tee proof/backend-tests.log
+          npm run test:release 2>&1 | tee proof/release-tests.log
+          npx expo install --check 2>&1 | tee proof/expo-compatibility.log
+          npx expo-doctor 2>&1 | tee proof/expo-doctor.log
+      - name: Generate native Xcode project
+        working-directory: native-app
+        run: |
+          set -o pipefail
+          xcodebuild -version | tee proof/xcode-version.log
+          npm run export:ios 2>&1 | tee proof/ios-export.log
+          npx expo prebuild --platform ios --no-install 2>&1 | tee proof/ios-prebuild.log
+          cd ios
+          pod install 2>&1 | tee ../proof/pod-install.log
+      - name: Compile unsigned native simulator app
+        working-directory: native-app
+        run: |
+          set -o pipefail
+          workspace=$(find ios -maxdepth 1 -name '*.xcworkspace' -print -quit)
+          test -n "$workspace"
+          scheme=$(basename "$workspace" .xcworkspace)
+          xcodebuild -workspace "$workspace" -scheme "$scheme" -configuration Release -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' -derivedDataPath native-build CODE_SIGNING_ALLOWED=NO -jobs 3 build 2>&1 | tee proof/xcode-build.log
+          app=$(find native-build/Build/Products/Release-iphonesimulator -maxdepth 1 -name '*.app' -print -quit)
+          test -n "$app"
+          printf '%s\n' "$app" > proof/simulator-app-path.txt
+          ditto -c -k --sequesterRsrc --keepParent "$app" school111-unsigned-simulator.app.zip
+      - name: Install and open app in iOS simulator
+        working-directory: native-app
+        run: |
+          set -o pipefail
+          device=$(xcrun simctl list devices available -j | python3 -c 'import sys,json; d=json.load(sys.stdin); a=[x for group in d["devices"].values() for x in group if x.get("isAvailable") and x["name"].startswith("iPhone")]; assert a; print(a[0]["udid"])')
+          xcrun simctl boot "$device" || true
+          xcrun simctl bootstatus "$device" -b
+          app=$(cat proof/simulator-app-path.txt)
+          bundle=$(/usr/libexec/PlistBuddy -c 'Print CFBundleIdentifier' "$app/Info.plist")
+          xcrun simctl install "$device" "$app"
+          xcrun simctl launch "$device" "$bundle" | tee proof/native-launch.log
+          sleep 12
+          xcrun simctl io "$device" screenshot preview/ios-simulator-login.png
+          xcrun simctl list devices available -j > proof/simulator-devices.json
+          printf '{"kind":"unsigned iOS simulator", "real_device":false, "signed_ipa":false, "testflight":false, "production_changed":false}\n' > proof/native-verdict.json
+      - name: Package readable sources and evidence
+        if: always()
+        run: |
+          python3 - <<'PY'
+          import pathlib,zipfile,hashlib,json
+          root=pathlib.Path('native-app')
+          if not root.exists(): raise SystemExit(0)
+          forbidden={'node_modules','Pods','native-build','.expo','.git'}
+          paths=[]
+          for p in root.rglob('*'):
+            if not p.is_file():continue
+            rel=p.relative_to(root)
+            if any(x in forbidden for x in rel.parts) or p.name.startswith('.env') and p.name!='.env.example' or p.name=='.xcode.env.local' or p.suffix in {'.ttf','.woff','.woff2','.p12','.mobileprovision','.sqlite','.db','.zip'}:continue
+            paths.append(p)
+          manifest={str(p.relative_to(root)):hashlib.sha256(p.read_bytes()).hexdigest() for p in paths}
+          (root/'proof/file-hashes.json').write_text(json.dumps(manifest,indent=2))
+          paths.append(root/'proof/file-hashes.json')
+          with zipfile.ZipFile('school111-native-ios-candidate.zip','w',zipfile.ZIP_DEFLATED) as z:
+            for p in paths:z.write(p,'school111-native/'+str(p.relative_to(root)))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: school111-native-source-and-proof
+          path: school111-native-ios-candidate.zip
+          retention-days: 14
+          if-no-files-found: warn
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: school111-unsigned-ios-simulator
+          path: native-app/school111-unsigned-simulator.app.zip
+          retention-days: 14
+          if-no-files-found: warn
