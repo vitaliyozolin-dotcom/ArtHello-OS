@@ -3,6 +3,9 @@ import json
 from pathlib import Path
 import subprocess
 import unittest
+import contextlib
+import io
+import runpy
 from unittest.mock import patch
 
 spec=importlib.util.spec_from_file_location('audit',Path(__file__).with_name('alfa_audit.py'))
@@ -30,5 +33,34 @@ class SchoolPinTests(unittest.TestCase):
         result,calls=self.probe('SHA256:not-the-accepted-school-key')
         self.assertEqual(result['reason'],'PINNED_KEY_MISMATCH')
         self.assertEqual(sum(c[0]=='ssh' for c in calls),1)
+
+class StoppedInventoryTests(unittest.TestCase):
+    def test_stopped_diagnostics_keep_retry_limit_without_disclosing_names(self):
+        row={'Id':'a'*64,'Image':'sha256:'+'b'*64,
+             'State':{'Running':False,'ExitCode':137,'OOMKilled':True,'FinishedAt':'2026-09-26T00:00:00Z','Error':'private-error'},
+             'Config':{'WorkingDir':'/app','Env':['DATABASE_PATH=/data/private.sqlite']},
+             'HostConfig':{'PortBindings':{},'RestartPolicy':{'Name':'on-failure','MaximumRetryCount':5}},
+             'Mounts':[{'Destination':'/data','Type':'volume','RW':True,'Name':'private-volume'}],
+             'NetworkSettings':{'Networks':{'private-network':{}}}}
+        def run(command, **kwargs):
+            args=command[1:]
+            if args==['ps','-q']: data=b''
+            elif args==['ps','-aq']: data=('a'*64).encode()
+            elif args[0]=='inspect': data=json.dumps([row]).encode()
+            elif args[:2]==['image','inspect']:
+                data=json.dumps([{'Config':{'Labels':{'org.opencontainers.image.revision':'5876accedbdf3758971fdc383f1e0fad8c32a158'}}}]).encode()
+            else: self.fail('Unexpected Docker operation')
+            return subprocess.CompletedProcess(command,0,data,b'')
+        output=io.StringIO()
+        with patch('subprocess.run',side_effect=run),contextlib.redirect_stdout(output):
+            runpy.run_path(str(Path(__file__).with_name('school_inventory.py')))
+        report=json.loads(output.getvalue()); stopped=report['stoppedCandidates'][0]
+        self.assertEqual(report['status'],'blocked')
+        self.assertIsNone(report['applicationContainerId'])
+        self.assertEqual(stopped['restartMaximumRetryCount'],5)
+        self.assertTrue(stopped['oomKilled'])
+        self.assertTrue(stopped['errorPresent'])
+        self.assertTrue(stopped['dataVolumePresent'])
+        self.assertNotIn('private-',output.getvalue())
 
 if __name__=='__main__':unittest.main()
