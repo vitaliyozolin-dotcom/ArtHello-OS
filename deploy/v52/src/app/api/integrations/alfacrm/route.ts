@@ -277,7 +277,7 @@ async function alfaAutosyncScope(state: AlfaState) {
 async function storedScopeAudit() {
   const records = await env.DB.prepare(`SELECT c.module,c.remote_branch_id,o.payload,o.observed_at
     FROM alfacrm_current_records c JOIN alfacrm_raw_observations o ON o.id=c.observation_id
-    WHERE c.module IN ('families','staff','groups')`).all<{ module: string; remote_branch_id: string; payload: string; observed_at: string }>();
+    WHERE c.module IN ('families','staff','groups') AND c.active=1`).all<{ module: string; remote_branch_id: string; payload: string; observed_at: string }>();
   const report: Record<string, unknown> = {};
   for (const module of ['families', 'staff', 'groups']) {
     const sourceRows = (records.results ?? []).filter(row => row.module === module);

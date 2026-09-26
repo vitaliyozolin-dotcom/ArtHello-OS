@@ -35,7 +35,7 @@ let source = stripTypeScriptTypes(readFileSync(resolve('app/api/integrations/alf
     assert.ok(adapters[name], `Unexpected dependency ${name}: update the explicit fixture adapter`);
     return `from "${adapters[name]}"`;
   });
-source += '\nexport {defaultState,persistState,readState,ensureAlfaTables,upsertRawRecords,canonicalizeFamilies,canonicalizeStaff,canonicalizeGroups,canonicalizeLessons,canonicalizeSubscriptions,canonicalizeFinance,importModule,previewModule,previewSignatureFor,normalizeEndpoint,alfaFetch,fetchPaged,fetchModuleRecords};\n//# sourceURL=alfacrm-correctness-fixture.mjs';
+source += '\nexport {storedScopeAudit,defaultState,persistState,readState,ensureAlfaTables,upsertRawRecords,canonicalizeFamilies,canonicalizeStaff,canonicalizeGroups,canonicalizeLessons,canonicalizeSubscriptions,canonicalizeFinance,importModule,previewModule,previewSignatureFor,normalizeEndpoint,alfaFetch,fetchPaged,fetchModuleRecords};\n//# sourceURL=alfacrm-correctness-fixture.mjs';
 const route = await import(dataModule(source));
 const branches = [{ id: 'BR-SCHOOL', name: 'School' }, { id: 'BR-NURSERY', name: 'Nursery' }];
 const session = { endpoint: 'https://fixture.s20.online', token: 'synthetic-token-for-tests', email: 'fixture@example.test', apiKey: 'synthetic-key', appKey: '' };
@@ -1349,4 +1349,17 @@ test('malformed tariff snapshots preserve the previous projection and repeated s
  await route.ensureAlfaTables();await route.ensureAlfaTables();
  assert.deepEqual(sql.prepare('SELECT * FROM alfacrm_subscription_facts').all(),before);
  assert.throws(()=>sql.exec('DELETE FROM alfacrm_raw_observations'),/append-only/);
+});
+
+
+test('stored staff audit excludes departed current pointers while retaining immutable evidence',async t=>{
+ const {sql}=await setup(t);
+ await importSnapshot('staff',{'1':[{id:11,name:'Current teacher'},{id:12,name:'Departed teacher'}]},{mappings:{'1':'BR-SCHOOL'}});
+ await importSnapshot('staff',{'1':[{id:11,name:'Current teacher'}]},{mappings:{'1':'BR-SCHOOL'}});
+ assert.equal(sql.prepare("SELECT active FROM alfacrm_current_records WHERE module='staff' AND record_id='12'").get().active,0);
+ const audit=await route.storedScopeAudit();
+ assert.equal(audit.modules.staff.observed,1);
+ assert.equal(audit.modules.staff.accepted,1);
+ assert.equal(audit.modules.staff.uniqueCustomers,1);
+ assert.ok(sql.prepare("SELECT count(*) n FROM alfacrm_raw_observations WHERE module='staff' AND record_id='12'").get().n>0);
 });
