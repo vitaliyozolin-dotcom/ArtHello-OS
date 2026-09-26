@@ -1,0 +1,13 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {checkBuild} from './check-build.mjs';
+import {checkRelease} from './check-release.mjs';
+const env={EXPO_PROJECT_ID:'12345678-1234-1234-1234-123456789abc',EXPO_OWNER:'fixture-only',IOS_IDENTITY_VERIFIED:'true',IOS_BUNDLE_IDENTIFIER:'ru.fixture.diary',EXPO_PUBLIC_API_ORIGIN:'https://example.com'};
+test('missing signing identity refuses TestFlight build',()=>assert.equal(checkBuild({}).allowedToBuild,false));
+test('verified configuration permits first signed beta before device QA',()=>assert.equal(checkBuild(env).allowedToBuild,true));
+test('build permission is never public-release approval',()=>assert.equal(checkBuild(env).publicReleaseReady,false));
+test('public release remains gated after beta build preflight',()=>assert.equal(checkRelease(env).ready,false));
+test('simulator cannot claim a signed iPhone build',()=>{const r=checkBuild({},'ios-simulator');assert.equal(r.allowedToBuild,true);assert.equal(r.readyForSignedBuild,false);});
+test('unknown profile cannot bypass prerequisites',()=>assert.equal(checkBuild(env,'prodction').allowedToBuild,false));
+test('local or insecure origin cannot enter distribution',()=>{for(const u of ['http://example.com','https://localhost:8843','https://127.0.0.1','https://[::1]','https://demo.invalid','https://server.local','https://example.com/path','https://u:p@example.com'])assert.equal(checkBuild({...env,EXPO_PUBLIC_API_ORIGIN:u}).allowedToBuild,false,u);});
+test('unverified bundle remains blocked',()=>assert.equal(checkBuild({...env,IOS_IDENTITY_VERIFIED:'false'}).allowedToBuild,false));

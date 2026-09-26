@@ -1,0 +1,100 @@
+name: School111 iPhone archive - unsigned candidate
+on:
+  push:
+    branches: [build/school111-iphone-archive]
+    paths: [.github/workflows/school111-iphone-archive.yml, mobile/school111/build-stages/**]
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: school111-device-archive-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  archive:
+    runs-on: macos-26
+    timeout-minutes: 40
+    env:
+      CI: '1'
+      EXPO_NO_TELEMETRY: '1'
+      EXPO_PUBLIC_API_ORIGIN: https://school-188-225-38-55.sslip.io
+      EXPO_PUBLIC_MOBILE_SERVICES: 'false'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          sparse-checkout: mobile/school111
+      - uses: actions/download-artifact@v4
+        with:
+          name: school111-keychain-fixed-source-and-proof
+          run-id: 36268330034
+          github-token: ${{ github.token }}
+          path: input
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Recover verified source and separate build from publication
+        run: python3 mobile/school111/build-stages/prepare.py
+      - name: Check source and install locked native dependencies
+        working-directory: native-app
+        run: |
+          set -o pipefail
+          npm ci --ignore-scripts --no-audit --no-fund 2>&1 | tee proof/install.log
+          npm run typecheck 2>&1 | tee proof/typecheck.log
+          npm test 2>&1 | tee proof/unit-tests.log
+          npm run test:backend 2>&1 | tee proof/backend-tests.log
+          npm run test:release 2>&1 | tee proof/release-tests.log
+          npm run test:build 2>&1 | tee proof/build-stage-tests.log
+          xcodebuild -version | tee proof/xcode-version.log
+          cd ios
+          pod install 2>&1 | tee ../proof/pod-install.log
+      - name: Archive actual iPhoneOS target without Apple credentials
+        working-directory: native-app
+        run: |
+          set -o pipefail
+          xcodebuild -workspace ios/111.xcworkspace -scheme 111 -configuration Release -sdk iphoneos -destination 'generic/platform=iOS' -archivePath device-build/School111.xcarchive -derivedDataPath device-build/DerivedData CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO -jobs 3 archive 2>&1 | tee proof/iphone-archive.log
+          python3 - <<'PY'
+          import pathlib,plistlib,hashlib,json
+          a=pathlib.Path('device-build/School111.xcarchive');p=a/'Products/Applications/111.app'
+          d=plistlib.loads((p/'Info.plist').read_bytes())
+          assert d['CFBundleSupportedPlatforms']==['iPhoneOS'],d.get('CFBundleSupportedPlatforms')
+          assert d['CFBundleIdentifier']=='ru.arthello.school111'
+          assert (p/d['CFBundleExecutable']).is_file()
+          fonts=[str(x) for x in a.rglob('*') if x.suffix.lower() in {'.ttf','.otf','.woff','.woff2'}]
+          assert not fonts,'Archive unexpectedly includes font files; do not distribute without review'
+          pathlib.Path('proof/device-archive-verdict.json').write_text(json.dumps({'archiveBuilt':True,'target':'iPhoneOS','bundleIdentifier':d['CFBundleIdentifier'],'version':d['CFBundleShortVersionString'],'build':d['CFBundleVersion'],'executableSHA256':hashlib.sha256((p/d['CFBundleExecutable']).read_bytes()).hexdigest(),'appleSigned':False,'installableOnIPhone':False,'testflight':False,'publicRelease':False,'needsAppleSigning':True,'productionChanged':False},indent=2))
+          PY
+          xcrun vtool -show-build device-build/School111.xcarchive/Products/Applications/111.app/111 > proof/iphone-mach-o-platform.txt
+          ditto -c -k --sequesterRsrc --keepParent device-build/School111.xcarchive school111-iphone-UNSIGNED.xcarchive.zip
+      - name: Preserve readable sources and exact archive proof
+        if: always()
+        run: |
+          python3 - <<'PY'
+          import pathlib,zipfile,json,hashlib,subprocess
+          r=pathlib.Path('native-app')
+          if not r.exists():raise SystemExit(0)
+          (r/'ci').mkdir(exist_ok=True)
+          (r/'ci/iphone-archive.yml').write_bytes(subprocess.check_output(['git','show','HEAD:.github/workflows/school111-iphone-archive.yml']))
+          excluded={'node_modules','Pods','device-build','.expo','.git','preview','prior-proof','tls'}
+          paths=[]
+          for p in r.rglob('*'):
+            if not p.is_file():continue
+            rel=p.relative_to(r)
+            if any(x in excluded for x in rel.parts) or p.suffix.lower() in {'.ttf','.otf','.woff','.woff2','.p12','.p8','.pem','.key','.mobileprovision','.db','.sqlite','.zip'} or p.name=='.xcode.env.local' or p.name.startswith('.env') and p.name!='.env.example':continue
+            paths.append(p)
+          h=r/'proof/archive-source-hashes.json';h.parent.mkdir(exist_ok=True);h.write_text(json.dumps({str(p.relative_to(r)):hashlib.sha256(p.read_bytes()).hexdigest() for p in paths},indent=2));paths.append(h)
+          with zipfile.ZipFile('school111-iphone-release-source.zip','w',zipfile.ZIP_DEFLATED) as z:
+            for p in paths:z.write(p,'school111-native/'+str(p.relative_to(r)))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: school111-iphone-archive-source-and-proof
+          path: school111-iphone-release-source.zip
+          retention-days: 30
+      - uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: school111-iphone-unsigned-xcarchive
+          path: native-app/school111-iphone-UNSIGNED.xcarchive.zip
+          retention-days: 30
