@@ -35,7 +35,7 @@ let source = stripTypeScriptTypes(readFileSync(resolve('app/api/integrations/alf
     assert.ok(adapters[name], `Unexpected dependency ${name}: update the explicit fixture adapter`);
     return `from "${adapters[name]}"`;
   });
-source += '\nexport {defaultState,persistState,readState,ensureAlfaTables,upsertRawRecords,canonicalizeFamilies,canonicalizeStaff,canonicalizeGroups,canonicalizeLessons,canonicalizeFinance,importModule,previewModule,previewSignatureFor,normalizeEndpoint,alfaFetch,fetchPaged};\n//# sourceURL=alfacrm-correctness-fixture.mjs';
+source += '\nexport {defaultState,persistState,readState,ensureAlfaTables,upsertRawRecords,canonicalizeFamilies,canonicalizeStaff,canonicalizeGroups,canonicalizeLessons,canonicalizeFinance,importModule,previewModule,previewSignatureFor,normalizeEndpoint,alfaFetch,fetchPaged,fetchModuleRecords};\n//# sourceURL=alfacrm-correctness-fixture.mjs';
 const route = await import(dataModule(source));
 const branches = [{ id: 'BR-SCHOOL', name: 'School' }, { id: 'BR-NURSERY', name: 'Nursery' }];
 const session = { endpoint: 'https://fixture.s20.online', token: 'synthetic-token-for-tests', email: 'fixture@example.test', apiKey: 'synthetic-key', appKey: '' };
@@ -1164,4 +1164,56 @@ test('one Alfa lesson with group_ids projects to each verified current group',as
  assert.equal(result.accepted,1);
  assert.equal(result.rejected,0);
  assert.equal(sql.prepare('SELECT count(*) AS n FROM education_lessons').get().n,2);
+});
+
+test('repeated lesson import preserves teacher homework while updating source schedule',async t=>{
+ const {sql,state}=await setup(t);const {createHash}=await import('node:crypto');
+ for(const column of ['group_id','program_id','scheduled_at','topic','room','status','homework','created_at','updated_at'])
+  sql.exec(`ALTER TABLE education_lessons ADD COLUMN ${column} TEXT`);
+ const groupId=`GRP-A-${createHash('sha256').update('1:5').digest('hex').slice(0,16).toUpperCase()}`;
+ sql.prepare("INSERT INTO education_groups(id,program_id) VALUES(?,'P1')").run(groupId);
+ sql.exec("INSERT INTO alfacrm_import_batches(id,module,scope,status,created_at) VALUES('HW1','lessons','{}','projecting','2026-09-01')");
+ const rows=[{remoteBranchId:'1',item:{id:8,group_ids:[5],date:'2026-09-01',time_from:'09:00',homework:'Source initial homework'}}];
+ await route.upsertRawRecords('lessons',rows,'HW1');
+ await route.canonicalizeLessons(rows,state,'TEST');
+ assert.equal(sql.prepare('SELECT homework FROM education_lessons').get().homework,'Source initial homework');
+ sql.exec("UPDATE education_lessons SET homework='Confirmed teacher homework'");
+ rows[0].item.homework='Replacement source homework';
+ rows[0].item.time_from='10:00';
+ await route.canonicalizeLessons(rows,state,'TEST');
+ const lesson=sql.prepare('SELECT homework,scheduled_at FROM education_lessons').get();
+ assert.equal(lesson.homework,'Confirmed teacher homework');
+ assert.equal(lesson.scheduled_at,'2026-09-01T07:00:00.000Z');
+ assert.equal(sql.prepare('SELECT count(*) n FROM education_lessons').get().n,1);
+});
+
+
+test('lesson fetch includes every status exactly once and retains individual participants', async t=>{
+ await setup(t);
+ const requested=[];
+ mockRecords({'1/lesson/index':body=>{
+  requested.push(body.status);
+  const status=body.status??3;
+  return Response.json({items:[{id:status,date:'2026-09-01',status,customer_ids:[91],teacher_ids:[81,82]}],total:1});
+ }});
+ const rows=await route.fetchModuleRecords(session,'lessons',['1'],{dateFrom:'2026-09-01',dateTo:'2026-09-30'});
+ assert.deepEqual(requested,[1,2,3]);
+ assert.deepEqual(rows.map(row=>row.item.status),[1,2,3]);
+ assert.deepEqual(rows[0].item.customer_ids,[91]);
+ assert.deepEqual(rows[0].item.teacher_ids,[81,82]);
+});
+
+test('lesson changing status during paginated snapshot is rejected instead of counted twice',async t=>{
+ await setup(t);
+ mockRecords({'1/lesson/index':body=>Response.json({items:[{id:7,status:body.status,date:'2026-09-01'}],total:1})});
+ await assert.rejects(route.fetchModuleRecords(session,'lessons',['1'],{dateFrom:'2026-09-01',dateTo:'2026-09-30'}),/повторила ID/);
+});
+
+
+test('lesson snapshot rejects ignored status and out-of-period source responses',async t=>{
+ await setup(t);
+ for(const item of [{id:1,status:3,date:'2026-09-01'},{id:1,status:1,date:'2026-08-31'},{id:1,status:1}]) {
+  mockRecords({'1/lesson/index':()=>Response.json({items:[item],total:1})});
+  await assert.rejects(route.fetchModuleRecords(session,'lessons',['1'],{dateFrom:'2026-09-01',dateTo:'2026-09-30'}),/не подтвердила/);
+ }
 });

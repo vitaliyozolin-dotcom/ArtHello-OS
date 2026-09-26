@@ -846,6 +846,22 @@ async function fetchModuleRecords(session: AlfaSession, module: ModuleKey, branc
     } else if (module === "lessons") {
       path = `${remoteBranchId}/lesson/index`;
       filters = { date_from: params.dateFrom, date_to: params.dateTo };
+      // The unfiltered endpoint is not a complete snapshot of all states.
+      // Keep one source lesson per branch even if it moves between reads.
+      const seen = new Set<string>();
+      for (const status of [1, 2, 3]) {
+        const lessons = await fetchPaged(session, path, { ...filters, status });
+        for (const item of lessons) {
+          const id = scalar(item.id);
+          if (!id || seen.has(id)) throw new AlfaApiError('AlfaCRM повторила ID занятий между статусами. Полнота загрузки не подтверждена; повторите чтение.');
+          if (scalar(item.status) !== String(status)) throw new AlfaApiError('AlfaCRM не подтвердила статус занятия. Изменения не применены.');
+          const date = isoDate(item.date ?? item.lesson_date);
+          if (!date || date < params.dateFrom || date > params.dateTo) throw new AlfaApiError('AlfaCRM не подтвердила период занятия. Изменения не применены.');
+          seen.add(id);
+          rows.push({ remoteBranchId, item });
+        }
+      }
+      continue;
     } else if (module === "finance") {
       path = `${remoteBranchId}/pay/index`;
       filters = { date_from: params.dateFrom.replace(/-/g, "."), date_to: params.dateTo.replace(/-/g, ".") };
@@ -1563,7 +1579,7 @@ async function canonicalizeLessons(rows: FetchedRecord[], state: AlfaState, acto
       statements.push(env.DB.prepare(`INSERT INTO education_lessons
       (id,group_id,program_id,scheduled_at,topic,teacher_entity_id,substitute_entity_id,room,status,homework,created_at,updated_at)
       VALUES (?,?,?,?,?,?,'',?,?,?,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)
-      ON CONFLICT(id) DO UPDATE SET group_id=excluded.group_id,program_id=excluded.program_id,scheduled_at=excluded.scheduled_at,topic=excluded.topic,teacher_entity_id=excluded.teacher_entity_id,room=excluded.room,status=excluded.status,homework=excluded.homework,updated_at=CURRENT_TIMESTAMP`)
+      ON CONFLICT(id) DO UPDATE SET group_id=excluded.group_id,program_id=excluded.program_id,scheduled_at=excluded.scheduled_at,topic=excluded.topic,teacher_entity_id=excluded.teacher_entity_id,room=excluded.room,status=excluded.status,updated_at=CURRENT_TIMESTAMP`)
       .bind(
         id,
         groupId,
