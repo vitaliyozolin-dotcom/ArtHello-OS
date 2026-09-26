@@ -14,6 +14,7 @@ type ModuleState = {
   status: "not_started" | "previewed" | "importing" | "imported" | "error";
   previewCount: number;
   importedCount: number;
+  subscriptionCount?: number;
   lastPreviewAt: string;
   lastImportAt: string;
   previewToken: string;
@@ -502,8 +503,8 @@ function ModuleCard({ definition, state, period, setPeriod, busy, canManage, imp
     {dependencyMissing ? <div className="ahAlfaCrmDependency">Сначала завершите: {moduleTitle(dependencyMissing)}.</div> : null}
     {moduleState.status === "error" ? <div className="ahAlfaCrmWarning">{moduleState.note || "Загрузка не завершена. Повторите предпросмотр."}</div> : null}
     {moduleState.status === "previewed" ? <div className="ahAlfaCrmPreviewResult"><strong>Найдено: {moduleState.previewCount}</strong><span>Проверено без записи в ArtHello OS.</span></div> : null}
-    {moduleState.status === "importing" ? <div className="ahAlfaCrmPreviewResult"><strong>Загружено записей: {moduleState.importedCount}</strong><span>{moduleState.note || "Продолжите пакетную загрузку."}</span></div> : null}
-    {imported ? <div className="ahAlfaCrmPreviewResult success"><strong>Загружено: {moduleState.importedCount}</strong><span>{moduleState.note || `Последняя загрузка: ${formatDateTime(moduleState.lastImportAt)}`}</span></div> : null}
+    {moduleState.status === "importing" ? <div className="ahAlfaCrmPreviewResult"><strong>{definition.key === "subscriptions" ? `Абонементов: ${moduleState.subscriptionCount ?? "не подтверждено"}; денежных остатков клиентов: ${moduleState.importedCount}` : `Загружено записей: ${moduleState.importedCount}`}</strong><span>{moduleState.note || "Продолжите пакетную загрузку."}</span></div> : null}
+    {imported ? <div className="ahAlfaCrmPreviewResult success"><strong>{definition.key === "subscriptions" ? `Абонементов: ${moduleState.subscriptionCount ?? "не подтверждено"}; денежных остатков клиентов: ${moduleState.importedCount}` : `Загружено: ${moduleState.importedCount}`}</strong><span>{moduleState.note || `Последняя загрузка: ${formatDateTime(moduleState.lastImportAt)}`}</span></div> : null}
 
     <div className="ahAlfaCrmModuleActions">
       <button type="button" className="secondary" disabled={!canManage || Boolean(busy) || Boolean(dependencyMissing)} onClick={() => void preview()}>{previewBusy ? "Считаю…" : imported ? "Пересчитать" : "Проверить данные"}</button>
