@@ -357,6 +357,7 @@ export async function syncTochkaReadOnly(input: {
     const transactions: TochkaTransactionSnapshot[] = [];
     let rejectedCount = selectedAccounts.length - accounts.length;
     let complete = true;
+    let missingBalances = false;
     for (const account of accounts) {
       const statementScope = { accountId: account.accountId, startDate, endDate };
       let initiatedStatementId = await input.statementState?.get(statementScope) ?? '';
@@ -430,13 +431,18 @@ export async function syncTochkaReadOnly(input: {
         continue;
       }
 
+      const startBalanceMinor = toMinorUnits(finalStatement.startDateBalance ?? finalStatement.StartDateBalance);
+      const endBalanceMinor = toMinorUnits(finalStatement.endDateBalance ?? finalStatement.EndDateBalance);
+      if (startBalanceMinor === null || endBalanceMinor === null) {
+        missingBalances = true;
+        rejectedCount += 1;
+        continue;
+      }
       const normalizedTransactions = (await Promise.all(
         extractTochkaStatementTransactions(finalStatement).slice(0, 20_000).map((transaction) => normalizeTochkaTransaction(transaction, account.accountId, initiatedStatementId)),
       )).filter((transaction): transaction is TochkaTransactionSnapshot => Boolean(transaction));
       rejectedCount += extractTochkaStatementTransactions(finalStatement).length - normalizedTransactions.length;
       transactions.push(...normalizedTransactions);
-      const startBalanceMinor = toMinorUnits(finalStatement.startDateBalance ?? finalStatement.StartDateBalance) ?? 0;
-      const endBalanceMinor = toMinorUnits(finalStatement.endDateBalance ?? finalStatement.EndDateBalance) ?? 0;
       const currency = cleanCurrency(readNestedCurrency(finalStatement)) || account.currency;
       const statementId = cleanProviderId(String(finalStatement.statementId ?? finalStatement.StatementId ?? initiatedStatementId));
       statements.push({
@@ -456,7 +462,7 @@ export async function syncTochkaReadOnly(input: {
     return {
       valid: true,
       complete: complete && rejectedCount === 0 && endDate === targetEndDate,
-      reason: rejectedCount > 0 ? "Часть данных выписки не обработана. Проверьте отклонённые операции; загрузка не завершена." : complete && endDate < targetEndDate ? "Сохранённая выписка загружена. Повторите синхронизацию, чтобы догрузить операции нового дня." : complete ? "Счета, остатки, выписки и операции загружены из Точки" : "Точка ещё формирует часть выписок — повторите синхронизацию",
+      reason: missingBalances ? "Остатки части выписок не подтверждены. Последние подтверждённые остатки сохранены; загрузка не завершена." : rejectedCount > 0 ? "Часть данных выписки не обработана. Проверьте отклонённые операции; загрузка не завершена." : complete && endDate < targetEndDate ? "Сохранённая выписка загружена. Повторите синхронизацию, чтобы догрузить операции нового дня." : complete ? "Счета, остатки, выписки и операции загружены из Точки" : "Точка ещё формирует часть выписок — повторите синхронизацию",
       expiresAt: validation.expiresAt,
       customerCode,
       accounts,

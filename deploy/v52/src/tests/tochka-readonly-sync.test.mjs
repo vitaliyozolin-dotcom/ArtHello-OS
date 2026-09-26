@@ -160,3 +160,23 @@ test("integration wizard has an independently scrollable mobile body and describ
   assert.match(styles, /@media \(max-width: 720px\)[\s\S]*?\.ahIntegrationModalLayer > \.ahIntegrationSetupWizard[\s\S]*?height:\s*calc\(100dvh - 20px\)/);
   assert.match(styles, /@media \(max-width: 720px\)[\s\S]*?\.ahIntegrationModalLayer \.ahIntegrationSetupWizard input,[\s\S]*?\.ahIntegrationModalLayer \.ahIntegrationSetupWizard select,[\s\S]*?\.ahIntegrationModalLayer \.ahIntegrationSetupWizard textarea\s*\{[\s\S]*?font-size:\s*16px/);
 });
+
+test("missing or invalid bank balances reject the statement without fabricating zero", async () => {
+  for (const balance of [undefined, null, '', 'invalid']) {
+    const result = await syncTochkaReadOnly({
+      token: token(), customerCode: "300000092", startDate: "2026-09-01", nowMs: fixedNow,
+      wait: async () => {},
+      request: async (input, init = {}) => {
+        const url = String(input);
+        if (url.endsWith('/customers')) return json({ Data: { Customer: [{ customerCode: '300000092' }] } });
+        if (url.endsWith('/accounts')) return json({ Data: { Account: [{ accountId, customerCode: '300000092', currency: 'RUB', status: 'Enabled' }] } });
+        if (init.method === 'POST') return json({ Data: { Statement: { accountId, statementId: 'missing-balance' } } });
+        return json({ Data: { Statement: { accountId, statementId: 'missing-balance', status: 'Ready', startDateBalance: balance, endDateBalance: '100.00', Transaction: [] } } });
+      },
+    });
+    assert.equal(result.complete, false);
+    assert.equal(result.statements.length, 0);
+    assert.ok(result.rejectedCount > 0);
+    assert.match(result.reason, /остат/);
+  }
+});

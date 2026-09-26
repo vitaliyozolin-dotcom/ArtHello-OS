@@ -77,6 +77,8 @@ export function validateClassification(catalog: ArticleCatalog, operation: Alloc
   if (!['Доходы ОПиУ', 'Расходы ОПиУ', 'Финансирование', 'Не включено в ОПиУ'].includes(reportClass)) throw new FinanceArticleError('Выберите класс ОПиУ');
   requireArticle(catalog, cashflowArticle, 'cashflow', operation.direction, cashflowArticle === (operation.cashflowArticle || (operation.category === 'Не классифицировано' ? '' : operation.category)));
   const affectsPnl = reportClass === 'Доходы ОПиУ' || reportClass === 'Расходы ОПиУ';
+  const cashArticle = catalog.articles.find(a => a.report === 'cashflow' && a.name === cashflowArticle);
+  if (affectsPnl && cashArticle && ['financing', 'internal'].includes(cashArticle.group)) throw new FinanceArticleError('Финансирование и внутренние переводы не включаются в ОПиУ.');
   const pnlDirection = reportClass === 'Доходы ОПиУ' ? 'Поступление' : 'Списание';
   const unchangedPnl = reportClass === operation.reportClass && pnlArticle === operation.pnlArticle && accrualPeriod === operation.accrualPeriod;
   if (affectsPnl && pnlDirection !== operation.direction && !unchangedPnl) throw new FinanceArticleError('Класс ОПиУ не соответствует направлению операции. Для возврата требуется отдельная корректировка ОПиУ.');

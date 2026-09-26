@@ -162,6 +162,10 @@ PINS = {
 
 # Exact verified D194 #75 receipt; do not accept a label without its container and image.
 CENTRAL_PREDECESSORS = {
+    # Verified release #85, run 36269374177; exact receipt observed 2026-09-27 MSK.
+    ('49cea8d5f69d356e16c6aa88ecc8a7e93cef417d',
+     '308dc013a0a93031beea8385e47691236cbc9c9616abfec73890b651a51d0c37',
+     'sha256:01b236f67cd1576ec6c92a7c2936c48c9d72b24b04cdcc526a26eb2748f9ffe6'),
     ('d83da0ce8311a4b60832031a217b91c7dd6bb1c8',
      '66cc912f6088bc1b929d23ee07fc906b94e82fdd2e747ce6419fb7b2fe3a7b91',
      'sha256:70fc84b541c2bffebd8d3130544d98158d25ced0c788890511b7d96a39c50216'),

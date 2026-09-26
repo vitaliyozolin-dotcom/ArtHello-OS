@@ -1090,6 +1090,13 @@ test("Tochka statement commit is idempotent and preserves manual finance classif
     database.database.prepare("UPDATE financial_operations SET category='Аренда',status='Разнесено'").run();
 
     const repeated = await dbModule.commitTochkaReadOnlySync("OWNER-LIVE", setup, sync, "Повторная загрузка", statementState.fence);
+    const incomplete = await dbModule.commitTochkaReadOnlySync("OWNER-LIVE", setup, {
+      ...sync, complete: false, statements: [], transactions: [], rejectedCount: 1,
+      reason: "Остатки не подтверждены",
+    }, "Неполная выписка", statementState.fence);
+    assert.equal(incomplete.committed, true);
+    assert.deepEqual({ ...database.database.prepare("SELECT balance_minor,balance_as_of FROM bank_accounts").get() }, { balance_minor: 17055, balance_as_of: "2026-09-03" });
+    await dbModule.commitTochkaReadOnlySync("OWNER-LIVE", setup, sync, "Восстановленная выписка", statementState.fence);
     await statementState.release();
     const expired = await dbModule.commitTochkaReadOnlySync('OWNER-LIVE', setup, sync, 'Завершённый запуск', statementState.fence);
     assert.equal(expired.committed, false);

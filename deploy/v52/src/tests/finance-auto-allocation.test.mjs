@@ -10,13 +10,13 @@ const base = {
   description: "Оплата за обучение в школе Атлас",
 };
 
-test("однозначное поступление школы Атлас разносится по филиалу и двум статьям", () => {
+test("однозначное поступление школы Атлас разносится по филиалу и ДДС без предположения о выручке", () => {
   assert.deepEqual(classifyFinanceOperation(base), {
     objectEntityId: "BR-ATLAS-SCHOOL",
     cashflowArticle: "Оплата школы",
-    pnlArticle: "Выручка школы",
-    reportClass: "Доходы ОПиУ",
-    accrualPeriod: "2026-09",
+    pnlArticle: "",
+    reportClass: "Не включено в ОПиУ",
+    accrualPeriod: "",
     status: "Разнесено автоматически",
   });
 });
@@ -33,3 +33,10 @@ test("до даты старта, по другому юрлицу, расход
   assert.equal(classifyFinanceOperation({ ...base, description: "Оплата школы и детского сада Атлас" }), null);
 });
 
+
+test("advance for another month never becomes cash-month revenue", () => {
+  const result = classifyFinanceOperation({ ...base, description: "Аванс за школу за октябрь 2026" });
+  assert.equal(result?.reportClass, "Не включено в ОПиУ");
+  assert.equal(result?.pnlArticle, "");
+  assert.equal(result?.accrualPeriod, "");
+});

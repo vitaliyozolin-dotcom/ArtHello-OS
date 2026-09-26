@@ -2973,7 +2973,8 @@ export async function commitTochkaReadOnlySync(
       SELECT ?,?,?,?,?,?,?,?,?,?,? WHERE ${guard}
       ON CONFLICT(id) DO UPDATE SET
         masked_account=excluded.masked_account,name=excluded.name,currency=excluded.currency,status=excluded.status,
-        balance_minor=excluded.balance_minor,balance_as_of=excluded.balance_as_of,synced_at=excluded.synced_at`)
+        balance_minor=COALESCE(excluded.balance_minor,bank_accounts.balance_minor),
+        balance_as_of=CASE WHEN excluded.balance_minor IS NULL THEN bank_accounts.balance_as_of ELSE excluded.balance_as_of END,synced_at=excluded.synced_at`)
       .bind(
         account.id,
         setup.connectionId,
