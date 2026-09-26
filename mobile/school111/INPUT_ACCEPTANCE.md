@@ -1,7 +1,7 @@
-# Native input acceptance correction
+# Native input and interruption acceptance
 
-Run 36271028429 passed production startup and native signing, then failed the synthetic login scenario. Captured native input was pexample.invalid rather than parent@example.invalid; the synthetic backend correctly rejected it. No authentication or Keychain success is claimed from that failure.
+Run 36271028429 passed native startup but its unchecked input burst lost characters. Run 36272289522 used actual keyboard events with exact per-character assertions: rejected password and successful authenticated login both worked. It then failed on the homework button because the iOS Save Password? system sheet covered the application (verified from the native screen recording, not inferred from element existence).
 
-The replacement XCTest input helper uses native keyboard events with a settle assertion after each character, checks exact login before submission and verifies secure-input length. It does not set application state, inject a session, weaken backend validation or automatically retry a mismatch. A successful run proves paced native keyboard input and the subsequent session lifecycle on the simulator; it does not prove every real-device keyboard, autofill or burst-typing scenario.
+The canonical XCTest now handles only the exact Save Password?/Сохранить пароль? sheet by choosing Not Now/Не сейчас. It does not suppress other permission prompts, application errors, validation, network failures or test assertions. Existing application autofill and secure storage stay enabled. No password is saved by the test into the OS password manager.
 
-The existing bounded replay workflow remains the only active workflow for this fix branch. No production actions, Apple credentials, new permissions, external notifications or paid-service purchases are involved.
+Keyboard input is paced, not injected; exact login and secure-input length are verified before submit. No retries, session injection, backend relaxations or runtime app code changes. Simulator results are not real-device burst typing/autofill acceptance. The existing bounded replay remains isolated from production and Apple credentials.
