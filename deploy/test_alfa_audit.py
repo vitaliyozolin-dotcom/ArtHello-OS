@@ -35,32 +35,44 @@ class SchoolPinTests(unittest.TestCase):
         self.assertEqual(sum(c[0]=='ssh' for c in calls),1)
 
 class StoppedInventoryTests(unittest.TestCase):
-    def test_stopped_diagnostics_keep_retry_limit_without_disclosing_names(self):
+    def probe(self, running=False):
         row={'Id':'a'*64,'Image':'sha256:'+'b'*64,
-             'State':{'Running':False,'ExitCode':137,'OOMKilled':True,'FinishedAt':'2026-09-26T00:00:00Z','Error':'private-error'},
+             'State':{'Running':running,'ExitCode':137,'OOMKilled':True,'FinishedAt':'2026-09-26T00:00:00Z','Error':'private-error'},
              'Config':{'WorkingDir':'/app','Env':['DATABASE_PATH=/data/private.sqlite']},
-             'HostConfig':{'PortBindings':{},'RestartPolicy':{'Name':'on-failure','MaximumRetryCount':5}},
+             'HostConfig':{'ReadonlyRootfs':False,'PortBindings':{},'RestartPolicy':{'Name':'on-failure','MaximumRetryCount':5}},
              'Mounts':[{'Destination':'/data','Type':'volume','RW':True,'Name':'private-volume'}],
              'NetworkSettings':{'Networks':{'private-network':{}}}}
         def run(command, **kwargs):
             args=command[1:]
-            if args==['ps','-q']: data=b''
+            if args==['ps','-q']: data=('a'*64).encode() if running else b''
             elif args==['ps','-aq']: data=('a'*64).encode()
             elif args[0]=='inspect': data=json.dumps([row]).encode()
             elif args[:2]==['image','inspect']:
-                data=json.dumps([{'Config':{'Labels':{'org.opencontainers.image.revision':'5876accedbdf3758971fdc383f1e0fad8c32a158'}}}]).encode()
+                revision='5802a5e6fb6d254f1f67a3776ae0c47d43a68859' if running else '5876accedbdf3758971fdc383f1e0fad8c32a158'
+                data=json.dumps([{'Config':{'Labels':{'org.opencontainers.image.revision':revision}}}]).encode()
             else: self.fail('Unexpected Docker operation')
             return subprocess.CompletedProcess(command,0,data,b'')
         output=io.StringIO()
         with patch('subprocess.run',side_effect=run),contextlib.redirect_stdout(output):
             runpy.run_path(str(Path(__file__).with_name('school_inventory.py')))
-        report=json.loads(output.getvalue()); stopped=report['stoppedCandidates'][0]
+        return json.loads(output.getvalue()),output.getvalue()
+
+    def test_accepted_successor_is_read_back_as_current_writer(self):
+        report,text=self.probe(running=True)
+        self.assertEqual(report['status'],'verified')
+        self.assertEqual(report['applicationContainerId'],'a'*64)
+        self.assertEqual(len(report['candidates']),1)
+        self.assertEqual(report['stoppedCandidates'],[])
+        self.assertNotIn('private-',text)
+
+    def test_stopped_diagnostics_keep_retry_limit_without_disclosing_names(self):
+        report,text=self.probe(); stopped=report['stoppedCandidates'][0]
         self.assertEqual(report['status'],'blocked')
         self.assertIsNone(report['applicationContainerId'])
         self.assertEqual(stopped['restartMaximumRetryCount'],5)
         self.assertTrue(stopped['oomKilled'])
         self.assertTrue(stopped['errorPresent'])
         self.assertTrue(stopped['dataVolumePresent'])
-        self.assertNotIn('private-',output.getvalue())
+        self.assertNotIn('private-',text)
 
 if __name__=='__main__':unittest.main()
