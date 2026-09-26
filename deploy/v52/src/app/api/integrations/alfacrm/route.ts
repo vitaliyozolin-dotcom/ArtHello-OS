@@ -287,7 +287,14 @@ async function storedScopeAudit() {
     report[module] = { ...auditAlfaBranchRows(module, rows), lastObservedAt: sourceRows.map(r => r.observed_at).sort().at(-1) ?? '' };
   }
   const familyCounts = await env.DB.prepare("SELECT status,COUNT(*) AS count FROM entities WHERE entity_type='Семья' GROUP BY status").all<{ status: string; count: number }>();
+  const lessonFacts = await env.DB.prepare(`SELECT remote_branch_id AS remoteBranchId,COUNT(*) AS sourceLessons,
+    SUM(CASE WHEN json_array_length(group_ids)=0 THEN 1 ELSE 0 END) AS individualLessons,
+    SUM(json_array_length(unresolved_group_ids)) AS unresolvedGroupLinks,
+    SUM(CASE WHEN teacher_ids IS NULL THEN 1 ELSE 0 END) AS unknownTeacherLists,
+    SUM(CASE WHEN scheduled_at IS NULL OR ends_at IS NULL THEN 1 ELSE 0 END) AS unknownTimes,
+    MAX(observed_at) AS lastObservedAt FROM alfacrm_lesson_facts GROUP BY remote_branch_id`).all();
   return { source: 'Последние сохранённые ответы AlfaCRM', modules: report, familyCardsByStatus: familyCounts.results ?? [],
+    lessonFacts: lessonFacts.results ?? [],
     note: 'Уникальные ID клиентов не равны уникальным семьям: несколько детей могут иметь одного представителя. Текущее состояние AlfaCRM подтверждается новой полной загрузкой.' };
 }
 
@@ -678,6 +685,7 @@ async function importModule(context: ImportContext, body: Record<string, unknown
   let invalidBalanceCount = 0;
   let projectionBlocked = false;
   let lessonRejectionReasons: { missingGroup: number; missingDate: number; unknownGroup: number } | undefined;
+  let unresolvedLessonGroupLinks = 0;
   if (module === "families") ({ accepted, rejected } = await canonicalizeFamilies(projectionRows, state, localBranches, context.actor));
   if (module === "staff") ({ accepted, rejected } = await canonicalizeStaff(projectionRows, state, localBranches, context.actor));
   if (module === "groups") ({ accepted, rejected } = await canonicalizeGroups(projectionRows, state, localBranches));
@@ -685,6 +693,7 @@ async function importModule(context: ImportContext, body: Record<string, unknown
     const result = await canonicalizeLessons(projectionRows, state, context.actor);
     ({ accepted, rejected } = result);
     lessonRejectionReasons = result.rejectionReasons;
+    unresolvedLessonGroupLinks = result.unresolvedGroupLinks;
   }
   if (module === "subscriptions") ({ accepted, rejected, invalidBalanceCount } = await canonicalizeSubscriptions(projectionRows, state));
   if (module === "finance") ({ accepted, rejected, projectionBlocked } = await canonicalizeFinance(projectionRows));
@@ -735,7 +744,7 @@ async function importModule(context: ImportContext, body: Record<string, unknown
       rawStored: rawCount,
       accepted,
       rejected,
-      ...(lessonRejectionReasons ? { lessonRejectionReasons } : {}),
+      ...(lessonRejectionReasons ? { lessonRejectionReasons, unresolvedLessonGroupLinks } : {}),
       deferredCustomer,
       invalidBalanceCount,
       projectionBlocked,
@@ -753,7 +762,7 @@ async function importModule(context: ImportContext, body: Record<string, unknown
     deferredCount: deferredCustomer ? 1 : 0,
     accepted,
     rejected,
-    ...(lessonRejectionReasons ? { lessonRejectionReasons } : {}),
+    ...(lessonRejectionReasons ? { lessonRejectionReasons, unresolvedLessonGroupLinks } : {}),
     invalidBalanceCount,
     projectionBlocked,
     complete: complete && !projectionBlocked,
@@ -1160,6 +1169,14 @@ async function legacyMigration(context: RequestContext, body: Record<string, unk
 
 async function ensureAlfaTables() {
   await env.DB.batch([
+    env.DB.prepare(`CREATE TABLE IF NOT EXISTS alfacrm_lesson_facts (
+      id TEXT PRIMARY KEY, remote_branch_id TEXT NOT NULL, local_branch_id TEXT NOT NULL,
+      source_lesson_id TEXT NOT NULL, lesson_date TEXT NOT NULL,
+      group_ids TEXT NOT NULL, unresolved_group_ids TEXT NOT NULL, customer_ids TEXT, teacher_ids TEXT,
+      subject_id TEXT, room_id TEXT, source_status TEXT,
+      scheduled_at TEXT, ends_at TEXT, payload_hash TEXT NOT NULL, observed_at TEXT NOT NULL,
+      UNIQUE(remote_branch_id,source_lesson_id)
+    )`),
     env.DB.prepare(`CREATE TABLE IF NOT EXISTS alfacrm_import_batches (
       id TEXT PRIMARY KEY,module TEXT NOT NULL,scope TEXT NOT NULL,status TEXT NOT NULL,created_at TEXT NOT NULL
     )`),
@@ -1555,26 +1572,52 @@ async function canonicalizeLessons(rows: FetchedRecord[], state: AlfaState, acto
   const statements = [];
   let accepted = 0;
   let rejected = 0;
+  let unresolvedGroupLinks = 0;
   const rejectionReasons = { missingGroup: 0, missingDate: 0, unknownGroup: 0 };
   for (const { remoteBranchId, item } of rows) {
     const lessonId = scalar(item.id);
-    const groupValues = Array.isArray(item.group_ids) ? item.group_ids : [item.group_id ?? record(item.group)?.id];
-    const remoteGroupIds = groupValues.map(value => scalar(record(value)?.id ?? value));
+    const readIds = (plural: unknown, singular: unknown): string[] | null => {
+      if (plural === undefined && (singular === undefined || singular === null)) return null;
+      const values = Array.isArray(plural) ? plural : plural === undefined ? [singular] : [plural];
+      const ids = values.map(value => scalar(record(value)?.id ?? value));
+      if (ids.some(id => !/^[1-9]\d*$/.test(id)) || new Set(ids).size !== ids.length) throw new AlfaApiError('AlfaCRM не подтвердила связи занятия. Изменения не применены.');
+      return ids;
+    };
+    const remoteGroupIds = readIds(item.group_ids, item.group_id ?? record(item.group)?.id) ?? [];
+    const customerIds = readIds(item.customer_ids, item.customer_id);
+    const teacherIds = readIds(item.teacher_ids, item.teacher_id ?? record(item.teacher)?.id);
     const date = isoDate(item.date ?? item.lesson_date);
     const localBranchId = state.branchMappings[remoteBranchId] ?? "";
-    if (!lessonId || !localBranchId || !remoteGroupIds.length || remoteGroupIds.some(id => !id)
-      || new Set(remoteGroupIds).size !== remoteGroupIds.length) {
+    if (!lessonId || !localBranchId || (!remoteGroupIds.length && !customerIds?.length)) {
       rejected += 1; rejectionReasons.missingGroup += 1; continue;
     }
-    if (!date) { rejected += 1; rejectionReasons.missingDate += 1; continue; }
+    if (!date || !Number.isFinite(Date.parse(`${date}T00:00:00Z`)) || new Date(`${date}T00:00:00Z`).toISOString().slice(0,10)!==date) { rejected += 1; rejectionReasons.missingDate += 1; continue; }
     const destinations = await Promise.all(remoteGroupIds.map(async remoteGroupId => {
       const groupId = await localGroupId(remoteBranchId, remoteGroupId);
       return { remoteGroupId, groupId, programId: groupPrograms.get(groupId) };
     }));
-    if (destinations.some(destination => !destination.programId)) { rejected += 1; rejectionReasons.unknownGroup += 1; continue; }
-    const teacherRemoteId = scalar(item.teacher_id ?? record(item.teacher)?.id);
+    const unresolvedGroupIds = destinations.filter(destination => !destination.programId).map(destination => destination.remoteGroupId);
+    unresolvedGroupLinks += unresolvedGroupIds.length;
+    const factId = `ALFA-LESSON-${remoteBranchId}-${lessonId}`;
+    const timeFrom = item.time_from ?? item.start_time;
+    const timeTo = item.time_to ?? item.end_time;
+    statements.push(env.DB.prepare(`INSERT INTO alfacrm_lesson_facts
+      (id,remote_branch_id,local_branch_id,source_lesson_id,lesson_date,group_ids,unresolved_group_ids,customer_ids,teacher_ids,subject_id,room_id,source_status,scheduled_at,ends_at,payload_hash,observed_at)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+      ON CONFLICT(remote_branch_id,source_lesson_id) DO UPDATE SET local_branch_id=excluded.local_branch_id,
+        lesson_date=excluded.lesson_date,group_ids=excluded.group_ids,unresolved_group_ids=excluded.unresolved_group_ids,customer_ids=excluded.customer_ids,teacher_ids=excluded.teacher_ids,
+        subject_id=excluded.subject_id,room_id=excluded.room_id,source_status=excluded.source_status,
+        scheduled_at=excluded.scheduled_at,ends_at=excluded.ends_at,payload_hash=excluded.payload_hash,observed_at=excluded.observed_at`)
+      .bind(factId,remoteBranchId,localBranchId,lessonId,date,JSON.stringify(remoteGroupIds),JSON.stringify(unresolvedGroupIds),customerIds===null?null:JSON.stringify(customerIds),teacherIds===null?null:JSON.stringify(teacherIds),
+        scalar(item.subject_id)||null,scalar(item.room_id)||null,scalar(item.status)||null,
+        lessonFactTimestamp(date,timeFrom),lessonFactTimestamp(date,timeTo),await hashText(JSON.stringify(item)),new Date().toISOString()));
+    statements.push(lineageStatement('alfacrm_lesson_facts',factId,'lessons',remoteBranchId,lessonId));
+    // The legacy group view has one teacher slot. Never choose arbitrarily
+    // between multiple teachers; every source teacher remains in the fact.
+    const teacherRemoteId = teacherIds?.length === 1 ? teacherIds[0] : '';
     const teacherEntityId = teacherRemoteId ? await localTeacherId(remoteBranchId, teacherRemoteId) : "";
     for (const { remoteGroupId, groupId, programId } of destinations) {
+      if (!programId) continue;
       const id = `LES-A-${await shortHash(`${remoteBranchId}:${lessonId}${destinations.length > 1 ? `:${remoteGroupId}` : ''}`)}`;
       statements.push(env.DB.prepare(`INSERT INTO education_lessons
       (id,group_id,program_id,scheduled_at,topic,teacher_entity_id,substitute_entity_id,room,status,homework,created_at,updated_at)
@@ -1597,7 +1640,7 @@ async function canonicalizeLessons(rows: FetchedRecord[], state: AlfaState, acto
   }
   await runBatches(statements);
   if (accepted) await env.DB.batch([auditStatement(actor, "integration.alfacrm_lessons_projected", { accepted, rejected })]);
-  return { accepted, rejected, rejectionReasons };
+  return { accepted, rejected, rejectionReasons, unresolvedGroupLinks };
 }
 
 async function canonicalizeSubscriptions(rows: FetchedRecord[], state: AlfaState) {
@@ -1973,6 +2016,15 @@ function isoDate(value: unknown) {
   if (ymd) return `${ymd[1]}-${ymd[2]}-${ymd[3]}`;
   const dmy = /^(\d{1,2})[./-](\d{1,2})[./-](\d{4})/.exec(text);
   return dmy ? `${dmy[3]}-${dmy[2].padStart(2, "0")}-${dmy[1].padStart(2, "0")}` : "";
+}
+
+function lessonFactTimestamp(date: string, value: unknown): string | null {
+  if (value === undefined || value === null || value === '') return null;
+  const match = /^(\d{1,2}):(\d{2})(?::(\d{2}))?$/.exec(scalar(value));
+  if (!match || Number(match[1]) > 23 || Number(match[2]) > 59 || Number(match[3] ?? 0) > 59) throw new AlfaApiError('AlfaCRM не подтвердила время занятия. Изменения не применены.');
+  const parsed = new Date(`${date}T${match[1].padStart(2,'0')}:${match[2]}:${match[3] ?? '00'}+03:00`);
+  if (Number.isNaN(parsed.getTime()) || new Date(`${date}T00:00:00Z`).toISOString().slice(0,10) !== date) throw new AlfaApiError('AlfaCRM не подтвердила дату занятия. Изменения не применены.');
+  return parsed.toISOString();
 }
 
 function lessonTimestamp(date: string, timeValue: unknown) {
