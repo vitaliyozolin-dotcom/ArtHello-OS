@@ -1,0 +1,66 @@
+name: School111 simulator Keychain signing proof
+on:
+  push:
+    branches: [build/school111-simulator-signature-20260926]
+permissions:
+  contents: read
+  actions: read
+jobs:
+  simulator:
+    runs-on: macos-26
+    timeout-minutes: 15
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: school111-unsigned-ios-simulator
+          run-id: 36262379555
+          github-token: ${{ github.token }}
+          path: input
+      - name: Verify exact compiled simulator archive
+        run: |
+          mkdir -p proof preview app
+          echo 'f2783cea7f8156e522478f63f74fe611c67be674d002d427f6796b56ce40f690  input/school111-unsigned-simulator.app.zip' | shasum -a 256 -c -
+          ditto -x -k input/school111-unsigned-simulator.app.zip app
+          find app -maxdepth 1 -name '*.app' -print > proof/app-path.txt
+          test $(wc -l < proof/app-path.txt) -eq 1
+      - name: Add simulator-only ad-hoc Keychain entitlement
+        run: |
+          application=$(cat proof/app-path.txt)
+          bundle=$(/usr/libexec/PlistBuddy -c 'Print CFBundleIdentifier' "$application/Info.plist")
+          test "$bundle" = ru.arthello.school111
+          python3 - <<'PY'
+          import plistlib,pathlib
+          data={'application-identifier':'ru.arthello.school111','keychain-access-groups':['ru.arthello.school111']}
+          pathlib.Path('proof/simulator-only.entitlements').write_bytes(plistlib.dumps(data))
+          PY
+          codesign --force --deep --sign - --entitlements proof/simulator-only.entitlements --timestamp=none "$application"
+          codesign --verify --deep --strict --verbose=2 "$application" 2>&1 | tee proof/signature-verification.log
+          codesign --display --entitlements - --xml "$application" > proof/signature-entitlements.xml 2> proof/signature-details.log
+          ditto -c -k --sequesterRsrc --keepParent "$application" school111-simulator.app.zip
+      - name: Boot simulator and open exact application
+        run: |
+          set -o pipefail
+          device=$(xcrun simctl list devices available -j | python3 -c 'import sys,json; d=json.load(sys.stdin); a=[x for group in d["devices"].values() for x in group if x.get("isAvailable") and x["name"].startswith("iPhone")]; assert a; print(a[0]["udid"])')
+          xcrun simctl boot "$device" || true
+          xcrun simctl bootstatus "$device" -b
+          application=$(cat proof/app-path.txt)
+          xcrun simctl install "$device" "$application"
+          xcrun simctl launch "$device" ru.arthello.school111 | tee proof/native-launch.log
+          sleep 15
+          xcrun simctl io "$device" screenshot preview/ios-simulator-login.png
+          xcrun simctl spawn "$device" log show --last 2m --style compact --predicate 'process == "111"' > proof/native-runtime.log 2>&1 || true
+          printf '{"kind":"ad-hoc signed iOS simulator", "originalBuildRun":36262379555, "signatureRun":"%s", "real_device":false, "signed_device_ipa":false, "testflight":false, "production_changed":false, "loginScreenVisualReview":"pending"}\n' "$GITHUB_RUN_ID" > proof/native-verdict.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: school111-simulator-keychain-proof
+          path: |
+            proof
+            preview
+          retention-days: 14
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: school111-simulator-signed-locally
+          path: school111-simulator.app.zip
+          retention-days: 14
