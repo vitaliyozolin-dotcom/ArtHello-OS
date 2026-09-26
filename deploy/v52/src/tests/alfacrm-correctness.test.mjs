@@ -58,7 +58,7 @@ async function setup(t) {
     INSERT INTO organization_branches VALUES('BR-SCHOOL','School','Активен',1),('BR-NURSERY','Nursery','Активен',2);
     CREATE TABLE entities(id TEXT PRIMARY KEY,entity_type TEXT,display_name TEXT,status TEXT,source_system TEXT,source_record_id TEXT,data_quality TEXT,scope TEXT,metadata TEXT,created_by TEXT,created_at TEXT,updated_at TEXT);
     CREATE TABLE entity_merges(survivor_id TEXT,duplicate_id TEXT UNIQUE,reason TEXT,created_by TEXT);
-    CREATE TABLE education_lessons(id TEXT PRIMARY KEY,teacher_entity_id TEXT,substitute_entity_id TEXT);
+    CREATE TABLE education_lessons(id TEXT PRIMARY KEY,teacher_entity_id TEXT,substitute_entity_id TEXT,group_id TEXT,program_id TEXT,scheduled_at TEXT,topic TEXT,room TEXT,status TEXT,homework TEXT,created_at TEXT,updated_at TEXT);
     CREATE TABLE entity_links(from_entity_id TEXT,to_entity_id TEXT,relation_type TEXT,created_by TEXT,UNIQUE(from_entity_id,to_entity_id,relation_type));
     CREATE TABLE audit_events(actor TEXT,action TEXT,entity_type TEXT,entity_id TEXT,payload TEXT);
     CREATE TABLE integration_connections(id TEXT,owner_entity_id TEXT,status TEXT,auth_status TEXT,verified_transfer INTEGER,is_enabled INTEGER,last_success_at TEXT,next_sync_at TEXT,error_count INTEGER,updated_at TEXT,received_count INTEGER,accepted_count INTEGER,rejected_count INTEGER);
@@ -1149,8 +1149,6 @@ test('lesson rejection reports bounded aggregate reasons without source details'
 
 test('one Alfa lesson with group_ids projects to each verified current group',async t=>{
  const {sql,state}=await setup(t);const {createHash}=await import('node:crypto');
- for(const column of ['group_id','program_id','scheduled_at','topic','room','status','homework','created_at','updated_at'])
-  sql.exec(`ALTER TABLE education_lessons ADD COLUMN ${column} TEXT`);
  sql.exec("INSERT INTO education_programs(id,title) VALUES('P1','Program')");
  for(const remoteId of [5,6]){
   const id=`GRP-A-${createHash('sha256').update(`1:${remoteId}`).digest('hex').slice(0,16).toUpperCase()}`;
@@ -1168,8 +1166,6 @@ test('one Alfa lesson with group_ids projects to each verified current group',as
 
 test('repeated lesson import preserves teacher homework while updating source schedule',async t=>{
  const {sql,state}=await setup(t);const {createHash}=await import('node:crypto');
- for(const column of ['group_id','program_id','scheduled_at','topic','room','status','homework','created_at','updated_at'])
-  sql.exec(`ALTER TABLE education_lessons ADD COLUMN ${column} TEXT`);
  const groupId=`GRP-A-${createHash('sha256').update('1:5').digest('hex').slice(0,16).toUpperCase()}`;
  sql.prepare("INSERT INTO education_groups(id,program_id) VALUES(?,'P1')").run(groupId);
  sql.exec("INSERT INTO alfacrm_import_batches(id,module,scope,status,created_at) VALUES('HW1','lessons','{}','projecting','2026-09-01')");
@@ -1197,7 +1193,7 @@ test('lesson fetch includes every status exactly once and retains individual par
   return Response.json({items:[{id:status,date:'2026-09-01',status,customer_ids:[91],teacher_ids:[81,82]}],total:1});
  }});
  const rows=await route.fetchModuleRecords(session,'lessons',['1'],{dateFrom:'2026-09-01',dateTo:'2026-09-30'});
- assert.deepEqual(requested,[1,2,3]);
+ assert.deepEqual(requested,[1,2,3,1,2,3]);
  assert.deepEqual(rows.map(row=>row.item.status),[1,2,3]);
  assert.deepEqual(rows[0].item.customer_ids,[91]);
  assert.deepEqual(rows[0].item.teacher_ids,[81,82]);
@@ -1274,4 +1270,41 @@ test('lesson facts migration is additive and idempotent over immutable source ev
  assert.equal(before[0].teacher_ids,null,'missing teacher list remains unknown');
  assert.equal(before[0].scheduled_at,null,'missing time remains unknown');
  assert.throws(()=>sql.exec("DELETE FROM alfacrm_raw_observations"),/append-only/);
+});
+
+
+test('reverse lesson status move cannot silently disappear from a complete snapshot',async t=>{
+ await setup(t);let reads=0;
+ mockRecords({'1/lesson/index':body=>{
+  reads++;
+  const items=reads>3 && body.status===1 ? [{id:95,status:1,date:'2026-09-01'}] : [];
+  return Response.json({items,total:items.length});
+ }});
+ await assert.rejects(route.fetchModuleRecords(session,'lessons',['1'],{dateFrom:'2026-09-01',dateTo:'2026-09-30'}),/изменился между/);
+});
+
+
+test('plural lesson relationships reject scalar and object response drift before writes',async t=>{
+ const {sql,state}=await setup(t);
+ for(const malformed of [{teacher_ids:20},{customer_ids:{id:10}},{group_ids:5}]) {
+  await assert.rejects(route.canonicalizeLessons([{remoteBranchId:'1',item:{id:99,date:'2026-09-01',customer_ids:[10],...malformed}}],state,'TEST'),/связи занятия/);
+ }
+ assert.equal(sql.prepare('SELECT count(*) n FROM alfacrm_lesson_facts').get().n,0);
+});
+
+test('group lesson becoming individual archives only stale source projections and preserves homework',async t=>{
+ const {sql,state}=await setup(t);const {createHash}=await import('node:crypto');
+ const groupId=`GRP-A-${createHash('sha256').update('1:5').digest('hex').slice(0,16).toUpperCase()}`;
+ sql.prepare("INSERT INTO education_groups(id,program_id) VALUES(?,'P1')").run(groupId);
+ sql.exec("INSERT INTO alfacrm_import_batches(id,module,scope,status,created_at) VALUES('MOVE','lessons','{}','projecting','2026-09-01')");
+ const rows=[{remoteBranchId:'1',item:{id:99,date:'2026-09-01',group_ids:[5],customer_ids:[10],status:1}}];
+ await route.upsertRawRecords('lessons',rows,'MOVE');await route.canonicalizeLessons(rows,state,'TEST');
+ sql.exec("UPDATE education_lessons SET homework='Confirmed homework'; INSERT INTO education_lessons(id,status) VALUES('MANUAL','1')");
+ rows[0].item.group_ids=[];
+ await route.canonicalizeLessons(rows,state,'TEST');
+ const legacy=sql.prepare("SELECT * FROM education_lessons WHERE id!='MANUAL'").get();
+ assert.equal(legacy.status,'Архив');assert.equal(legacy.homework,'Confirmed homework');
+ assert.equal(sql.prepare("SELECT status FROM education_lessons WHERE id='MANUAL'").get().status,'1');
+ assert.equal(sql.prepare('SELECT count(*) n FROM alfacrm_lesson_facts').get().n,1);
+ assert.equal(sql.prepare("SELECT count(*) n FROM alfacrm_projection_lineage WHERE projection_table='education_lessons'").get().n,1,'historical lineage remains');
 });

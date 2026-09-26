@@ -857,19 +857,28 @@ async function fetchModuleRecords(session: AlfaSession, module: ModuleKey, branc
       filters = { date_from: params.dateFrom, date_to: params.dateTo };
       // The unfiltered endpoint is not a complete snapshot of all states.
       // Keep one source lesson per branch even if it moves between reads.
-      const seen = new Set<string>();
-      for (const status of [1, 2, 3]) {
-        const lessons = await fetchPaged(session, path, { ...filters, status });
-        for (const item of lessons) {
-          const id = scalar(item.id);
-          if (!id || seen.has(id)) throw new AlfaApiError('AlfaCRM повторила ID занятий между статусами. Полнота загрузки не подтверждена; повторите чтение.');
-          if (scalar(item.status) !== String(status)) throw new AlfaApiError('AlfaCRM не подтвердила статус занятия. Изменения не применены.');
-          const date = isoDate(item.date ?? item.lesson_date);
-          if (!date || date < params.dateFrom || date > params.dateTo) throw new AlfaApiError('AlfaCRM не подтвердила период занятия. Изменения не применены.');
-          seen.add(id);
-          rows.push({ remoteBranchId, item });
+      const readStatuses = async () => {
+        const snapshot: FetchedRecord[] = [];
+        const seen = new Set<string>();
+        for (const status of [1, 2, 3]) {
+          const lessons = await fetchPaged(session, path, { ...filters, status });
+          for (const item of lessons) {
+            const id = scalar(item.id);
+            if (!id || seen.has(id)) throw new AlfaApiError('AlfaCRM повторила ID занятий между статусами. Полнота загрузки не подтверждена; повторите чтение.');
+            if (scalar(item.status) !== String(status)) throw new AlfaApiError('AlfaCRM не подтвердила статус занятия. Изменения не применены.');
+            const date = isoDate(item.date ?? item.lesson_date);
+            if (!date || date < params.dateFrom || date > params.dateTo) throw new AlfaApiError('AlfaCRM не подтвердила период занятия. Изменения не применены.');
+            seen.add(id);
+            snapshot.push({ remoteBranchId, item });
+          }
         }
-      }
+        return snapshot;
+      };
+      const first = await readStatuses();
+      const second = await readStatuses();
+      const signature = (snapshot: FetchedRecord[]) => JSON.stringify(snapshot.map(row => JSON.stringify(row.item)).sort());
+      if (signature(first) !== signature(second)) throw new AlfaApiError('Состав занятий AlfaCRM изменился между полными чтениями. Изменения не применены; повторите чтение.');
+      rows.push(...second);
       continue;
     } else if (module === "finance") {
       path = `${remoteBranchId}/pay/index`;
@@ -1578,7 +1587,8 @@ async function canonicalizeLessons(rows: FetchedRecord[], state: AlfaState, acto
     const lessonId = scalar(item.id);
     const readIds = (plural: unknown, singular: unknown): string[] | null => {
       if (plural === undefined && (singular === undefined || singular === null)) return null;
-      const values = Array.isArray(plural) ? plural : plural === undefined ? [singular] : [plural];
+      if (plural !== undefined && !Array.isArray(plural)) throw new AlfaApiError('AlfaCRM не подтвердила связи занятия. Изменения не применены.');
+      const values = Array.isArray(plural) ? plural : [singular];
       const ids = values.map(value => scalar(record(value)?.id ?? value));
       if (ids.some(id => !/^[1-9]\d*$/.test(id)) || new Set(ids).size !== ids.length) throw new AlfaApiError('AlfaCRM не подтвердила связи занятия. Изменения не применены.');
       return ids;
@@ -1616,9 +1626,11 @@ async function canonicalizeLessons(rows: FetchedRecord[], state: AlfaState, acto
     // between multiple teachers; every source teacher remains in the fact.
     const teacherRemoteId = teacherIds?.length === 1 ? teacherIds[0] : '';
     const teacherEntityId = teacherRemoteId ? await localTeacherId(remoteBranchId, teacherRemoteId) : "";
+    const currentProjectionIds: string[] = [];
     for (const { remoteGroupId, groupId, programId } of destinations) {
       if (!programId) continue;
       const id = `LES-A-${await shortHash(`${remoteBranchId}:${lessonId}${destinations.length > 1 ? `:${remoteGroupId}` : ''}`)}`;
+      currentProjectionIds.push(id);
       statements.push(env.DB.prepare(`INSERT INTO education_lessons
       (id,group_id,program_id,scheduled_at,topic,teacher_entity_id,substitute_entity_id,room,status,homework,created_at,updated_at)
       VALUES (?,?,?,?,?,?,'',?,?,?,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)
@@ -1636,6 +1648,13 @@ async function canonicalizeLessons(rows: FetchedRecord[], state: AlfaState, acto
       ));
       statements.push(lineageStatement("education_lessons", id, "lessons", remoteBranchId, lessonId));
     }
+    // Retain history and local homework; only retire projections owned by
+    // this exact source lesson which are no longer among its group views.
+    statements.push(env.DB.prepare(`UPDATE education_lessons SET status='Архив',updated_at=CURRENT_TIMESTAMP
+      WHERE id IN (SELECT l.projection_id FROM alfacrm_projection_lineage l
+        JOIN alfacrm_raw_observations o ON o.id=l.observation_id
+        WHERE l.projection_table='education_lessons' AND o.module='lessons' AND o.remote_branch_id=? AND o.record_id=?)
+      AND id NOT IN (SELECT value FROM json_each(?))`).bind(remoteBranchId,lessonId,JSON.stringify(currentProjectionIds)));
     accepted += 1;
   }
   await runBatches(statements);
