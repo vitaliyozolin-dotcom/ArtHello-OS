@@ -11,7 +11,9 @@ from contextlib import contextmanager
 ROOT=Path(__file__).resolve().parents[1]
 # Previously accepted School key; D065/R17 protected School transport.
 SCHOOL_HOST_PIN='SHA256:/kBNohTF+5g8U+jQt+PzOCoWZ9yCSFjBnEP3Oc3MwRI'
-AUDIT_CENTRAL_LIVE=('d83da0ce8311a4b60832031a217b91c7dd6bb1c8',
+# Exact central source from successful protected release 36269374177.
+AUDIT_CENTRAL_LIVE=('49cea8d5f69d356e16c6aa88ecc8a7e93cef417d',
+                    'd83da0ce8311a4b60832031a217b91c7dd6bb1c8',
                     'd066c3e7d94124efd847310e0d5ae9822401fa2f')
 
 def load(name):
@@ -76,6 +78,9 @@ def school_inventory():
     except Exception:
         return {'status':'blocked','reason':'SSH_RESPONSE_UNCONFIRMED'}
 
+def verify_central_source(central_source, controller_source):
+    require(central_source in (release.PINS['central'][0],*AUDIT_CENTRAL_LIVE,controller_source),'CENTRAL_SOURCE')
+
 def main():
     os.umask(0o077)
     expected={'GITHUB_REPOSITORY':release.REPOSITORY,'GITHUB_EVENT_NAME':'workflow_dispatch','GITHUB_REF':'refs/heads/main',
@@ -95,7 +100,7 @@ def main():
     require(container['State']['Running'] is True,'CENTRAL_UNAVAILABLE')
     image=json.loads(release.docker('image','inspect',container['Image']))[0]
     central_source=image['Config']['Labels'].get('org.opencontainers.image.revision')
-    require(central_source in (release.PINS['central'][0],*AUDIT_CENTRAL_LIVE,source),'CENTRAL_SOURCE')
+    verify_central_source(central_source,source)
     report={'controllerSha':source,'centralSource':central_source,'businessDataChanged':False}
     report['bank']=capture(['docker','exec','-i',name,'node','--input-type=module','-'],'BANK_DATA_AUDIT=',data=(ROOT/'deploy/bank-data-audit.mjs').read_bytes())
     print('BANK_RECONCILIATION='+json.dumps(report['bank'],ensure_ascii=False),flush=True)
