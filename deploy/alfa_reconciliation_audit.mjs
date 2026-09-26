@@ -61,15 +61,25 @@ export async function audit(client) {
   try {
     const login=await client.login(); authenticated=true;
     if (login?.userId !== 'USR-OWNER' || login?.isSystemOwner !== true || login?.mustChangePassword !== false) throw Error('CANONICAL_OWNER_REQUIRED');
-    const current=await client.json('GET',ORIGIN,PATH);
+    const current=await client.json('GET',ORIGIN,PATH+'?scopeAudit=1');
     if (!current.canManageCredentials || !current.credentialStored || current.state?.endpoint !== 'https://arthellonew.s20.online') throw Error('SOURCE_ACCOUNT_UNCONFIRMED');
     result.connector={connected:current.state.connected===true,importEnabled:current.importEnabled===true,autosyncAvailable:current.autosyncAvailable===true,autosyncEnabled:current.state.autosync?.enabled===true,
       branchMappings:Object.fromEntries(pairs(current.state.branchMappings)), educationRouting:Object.fromEntries(Object.entries(current.state.educationRouting??{}).filter(([key,value])=>/^[1-9]\d*:[1-9]\d*$/.test(key)&&typeof value==='string'&&/^BR-[A-Z0-9-]+$/.test(value))),
       modules:Object.fromEntries(Object.entries(current.state.modules??{}).filter(([key])=>['families','staff','groups','lessons','subscriptions','finance'].includes(key)).map(([key,row])=>[key,{status:row.status,importedCount:count(row.importedCount)}]))};
+    const staff=current.scopeAudit?.modules?.staff;
+    const staffFields=['observed','accepted','foreignBranch','inactive','unknown'];
+    const observedAt=staff?.lastObservedAt;
+    const validStaff=staff && staffFields.every(key=>count(staff[key])!==null) && count(staff.uniqueCustomers)!==null
+      && typeof observedAt==='string' && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/.test(observedAt) && Number.isFinite(Date.parse(observedAt));
+    result.checks.staffStored=validStaff ? {
+      status:'verified',source:'stored-observations',
+      ...Object.fromEntries(staffFields.map(key=>[key,count(staff[key])])),
+      uniqueSourceTeacherIds:count(staff.uniqueCustomers),complete:staff.complete===true,lastObservedAt:observedAt,
+      byBranch:Object.fromEntries(Object.entries(staff.byBranch??{}).filter(([id,n])=>/^[1-9]\d*$/.test(id)&&count(n)!==null)),
+    } : {status:'blocked',reason:'STORED_STAFF_EVIDENCE_UNCONFIRMED'};
     const checks=[
       ['customers',{action:'previewCustomers'},summarizePreview],
       ['legacy',{action:'previewLegacyMigration'},v=>({count:count(v.legacyMigration?.count),complete:v.legacyMigration?.complete===true})],
-      ['staffPreview',{action:'previewModule',module:'staff'},v=>({count:count(v.count)})],
       ...['BR-ATLAS-SCHOOL','BR-SCHOOL'].map(branchId=>[branchId,{action:'readDiaryDirectoryOptions',branchId},v=>({branchId,classes:v.diaryOptions?.classes?.length??null,groups:v.diaryOptions?.groups?.length??null})]),
     ];
     for (const [name,body,summarize] of checks) {

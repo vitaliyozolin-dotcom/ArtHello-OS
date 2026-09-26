@@ -1125,3 +1125,9 @@ Protected release `35802245656`, job `106994993116`, завершился 23.09.
 Миграция SQLite аддитивна и идемпотентна в существующем ensureAlfaTables; старые таблицы, local homework, raw и права не изменяются. PostgreSQL lib/db schema/journal/barrel/migrate.ts не затронуты, migration-twin к этой таблице не применим. Поведенческий тест повторного ensure сохраняет факты, историю и append-only trigger. Rollback приложения оставляет новую таблицу и provenance для последующего восстановления; автоматический DROP не нужен и не разрешён. Production по-прежнему требует exact-source Quality/Proof/Verify и проверенную резервную копию.
 
 D243 review: present plural relationship fields must be arrays. When source group membership changes, archive only stale education_lessons projections proved by exact branch/lesson raw lineage. Preserve their homework, attendance references and lineage; unrelated/manual lessons remain unchanged.
+
+## D244 — Проверка сотрудников без изменяющего preview (2026-09-26)
+
+По #606 read-only аудит больше не вызывает previewModule(staff), который изменяет preview token и запрещён при включённом autosync. Использовать существующий owner-only GET scopeAudit=1. В публичном отчёте только разрешённые агрегаты и валидированное время, отдельно uniqueSourceTeacherIds и филиальные назначения. Явная метка stored-observations исключает подмену свежего чтения AlfaCRM сохранёнными данными; fresh teacher source продолжает читаться независимым source audit. Отсутствие корректного сохранённого среза обозначается blocked, не нулём. Это не подтверждает кадровый состав вне Alfa Teacher или учётные записи. Права, состояние автосинхрона и импортные токены не меняются.
+
+D244 review: storedScopeAudit reads active current pointers only. Departed source records remain in immutable history but cannot count as current staff. Regression: two teachers followed by one produces one current audit teacher and retained raw evidence for the departed teacher.

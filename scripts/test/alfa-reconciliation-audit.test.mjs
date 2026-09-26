@@ -29,7 +29,27 @@ test('audit restricts requests to previews and checks both diaries after a faile
     if(body.action==='previewModule') { assert.equal(body.module,'staff'); throw Error('ALFA_UPSTREAM_HTTP_429'); }
     return {diaryOptions:{classes:[],groups:[]}};
   }});
-  assert.deepEqual(calls,['GET','previewCustomers','previewLegacyMigration','previewModule','readDiaryDirectoryOptions','readDiaryDirectoryOptions']);
+  assert.deepEqual(calls,['GET','previewCustomers','previewLegacyMigration','readDiaryDirectoryOptions','readDiaryDirectoryOptions']);
   assert.equal(loggedOut,true);assert.equal(result.checks.customers.status,'blocked');assert.equal(result.checks['BR-SCHOOL'].status,'verified');assert.equal(result.businessDataChanged,false);
-  assert.equal(result.checks.staffPreview.reason,'ALFA_UPSTREAM_HTTP_429');
+  assert.equal(result.checks.staffStored.reason,'STORED_STAFF_EVIDENCE_UNCONFIRMED');
+});
+
+test('staff audit reads stored evidence with autosync enabled without creating an import preview',async()=>{
+ const calls=[];
+ const result=await audit({login:async()=>({userId:'USR-OWNER',isSystemOwner:true,mustChangePassword:false}),logoutAll:async()=>{},json:async(method,origin,path,body)=>{
+  calls.push({method,path,action:body?.action});
+  if(method==='GET')return {canManageCredentials:true,credentialStored:true,state:{endpoint:'https://arthellonew.s20.online',autosync:{enabled:true}},scopeAudit:{modules:{staff:{observed:3,accepted:2,uniqueCustomers:1,foreignBranch:0,inactive:1,unknown:0,complete:true,byBranch:{'6':1,'10':1,private:99},lastObservedAt:'2026-09-26T17:00:00.000Z',private:'private name'}}}};
+  if(body.action==='previewModule')throw Error('IMPORT_PREVIEW_MUST_NOT_RUN');
+  if(body.action==='previewCustomers')throw Error('HTTP_409');
+  if(body.action==='previewLegacyMigration')return {legacyMigration:{count:0,complete:true}};
+  return {diaryOptions:{classes:[],groups:[]}};
+ }});
+ assert.equal(calls[0].path,'/api/integrations/alfacrm?scopeAudit=1');
+ assert.equal(calls.some(c=>c.action==='previewModule'),false);
+ assert.equal(result.checks.staffStored.status,'verified');
+ assert.equal(result.checks.staffStored.uniqueSourceTeacherIds,1);
+ assert.equal(result.checks.staffStored.accepted,2);
+ assert.equal(result.checks.staffStored.source,'stored-observations');
+ assert.equal(result.connector.autosyncEnabled,true);
+ assert.doesNotMatch(JSON.stringify(result),/private/);
 });
