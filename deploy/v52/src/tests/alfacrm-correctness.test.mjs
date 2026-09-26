@@ -1197,7 +1197,7 @@ test('lesson fetch includes every status exactly once and retains individual par
   return Response.json({items:[{id:status,date:'2026-09-01',status,customer_ids:[91],teacher_ids:[81,82]}],total:1});
  }});
  const rows=await route.fetchModuleRecords(session,'lessons',['1'],{dateFrom:'2026-09-01',dateTo:'2026-09-30'});
- assert.deepEqual(requested,[1,2,3]);
+ assert.deepEqual(requested,[1,2,3,1,2,3]);
  assert.deepEqual(rows.map(row=>row.item.status),[1,2,3]);
  assert.deepEqual(rows[0].item.customer_ids,[91]);
  assert.deepEqual(rows[0].item.teacher_ids,[81,82]);
@@ -1216,4 +1216,15 @@ test('lesson snapshot rejects ignored status and out-of-period source responses'
   mockRecords({'1/lesson/index':()=>Response.json({items:[item],total:1})});
   await assert.rejects(route.fetchModuleRecords(session,'lessons',['1'],{dateFrom:'2026-09-01',dateTo:'2026-09-30'}),/не подтвердила/);
  }
+});
+
+
+test('reverse lesson status move cannot silently disappear from a complete snapshot',async t=>{
+ await setup(t);let reads=0;
+ mockRecords({'1/lesson/index':body=>{
+  reads++;
+  const items=reads>3 && body.status===1 ? [{id:95,status:1,date:'2026-09-01'}] : [];
+  return Response.json({items,total:items.length});
+ }});
+ await assert.rejects(route.fetchModuleRecords(session,'lessons',['1'],{dateFrom:'2026-09-01',dateTo:'2026-09-30'}),/изменился между/);
 });
