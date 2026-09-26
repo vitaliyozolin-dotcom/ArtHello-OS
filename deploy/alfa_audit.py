@@ -27,7 +27,7 @@ def capture(command, prefix, *, data=None, timeout=600):
     lines=result.stdout.decode().splitlines()
     reports=[json.loads(line[len(prefix):]) for line in lines if line.startswith(prefix)]
     if result.returncode==0 and len(reports)==1: return reports[0]
-    safe=re.findall(rb'(?:ALFA_OS_AUDIT_BLOCKED|ALFA_SOURCE_AUDIT_FAILED)=([A-Z_0-9]{3,70})',result.stderr)
+    safe=re.findall(rb'(?:ALFA_OS_AUDIT_BLOCKED|ALFA_SOURCE_AUDIT_FAILED|BANK_DATA_AUDIT_BLOCKED)=([A-Z_0-9]{3,70})',result.stderr)
     return {'status':'blocked','reason':safe[-1].decode() if safe else 'COMMAND_UNCONFIRMED'}
 
 @contextmanager
@@ -97,6 +97,8 @@ def main():
     central_source=image['Config']['Labels'].get('org.opencontainers.image.revision')
     require(central_source in (release.PINS['central'][0],*AUDIT_CENTRAL_LIVE,source),'CENTRAL_SOURCE')
     report={'controllerSha':source,'centralSource':central_source,'businessDataChanged':False}
+    report['bank']=capture(['docker','exec','-i',name,'node','--input-type=module','-'],'BANK_DATA_AUDIT=',data=(ROOT/'deploy/bank-data-audit.mjs').read_bytes())
+    print('BANK_RECONCILIATION='+json.dumps(report['bank'],ensure_ascii=False),flush=True)
     report['source']=capture(['docker','exec','-i',name,'node','--input-type=module','-'],'ALFA_SOURCE_AUDIT=',data=(ROOT/'.github/scripts/alfa-source-audit.mjs').read_bytes())
     print('ALFA_SOURCE_RECONCILIATION='+json.dumps({'controllerSha':source,'centralSource':central_source,
         'observedAt':report['source'].get('observedAt'),
