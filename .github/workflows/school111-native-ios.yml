@@ -61,6 +61,12 @@ jobs:
           echo "$device" > proof/simulator-id.txt
           xcrun simctl boot "$device" 2>&1 | tee proof/simulator-boot.log || true
           xcrun simctl bootstatus "$device" -b 2>&1 | tee proof/simulator-bootstatus.log
+          # CI simulator preference only, using Appium's documented implementation.
+          # App source/autofill capability and the actual application Keychain remain unchanged.
+          xcrun simctl spawn "$device" defaults write com.apple.WebUI AutoFillPasswords -int 0
+          xcrun simctl spawn "$device" defaults read com.apple.WebUI AutoFillPasswords > proof/simulator-password-autofill.txt
+          test "$(tr -d '[:space:]' < proof/simulator-password-autofill.txt)" = 0
+          printf '{"scope":"ephemeral CI simulator only","passwordAutofillEnabled":false,"applicationAutofillChanged":false,"applicationKeychainDisabled":false,"autofillAcceptance":"not tested"}\n' > proof/simulator-input-environment.json
           codesign --verify --deep --strict --verbose=2 ci/real-production-app/111.app 2>&1 | tee proof/signature-verification.log
           xcrun simctl install "$device" ci/real-production-app/111.app 2>&1 | tee proof/simulator-install.log
       - name: Native startup of the exact production-origin app
@@ -111,7 +117,7 @@ jobs:
           import json,pathlib
           s=json.loads(pathlib.Path('proof/native-fixture-final.json').read_text())
           assert s['loginAccepted']>=3 and s['loginRejected']>=1 and s['logout']>=1 and s['cookiesObserved'] and s['authenticatedReads']>=5 and s['unauthenticatedDenied']>=1,s
-          pathlib.Path('proof/native-verdict.json').write_text(json.dumps({'productionStartup':'PASS','nativeSessionScenario':'PASS','compiledBuildRun':36268330034,'storage':'actual iOS simulator Keychain','transport':'native HTTPS to isolated fixture','qaConfigOnlyOverride':True,'runtimeCodeUnchanged':True,'fictionalDataOnly':True,'realDevice':False,'signedDeviceIPA':False,'testflight':False,'productionChanged':False},indent=2))
+          pathlib.Path('proof/native-verdict.json').write_text(json.dumps({'productionStartup':'PASS','nativeSessionScenario':'PASS','compiledBuildRun':36268330034,'storage':'actual iOS simulator Keychain','transport':'native HTTPS to isolated fixture','qaConfigOnlyOverride':True,'runtimeCodeUnchanged':True,'simulatorPasswordAutofillEnabled':False,'autofillAcceptance':'not tested','fictionalDataOnly':True,'realDevice':False,'signedDeviceIPA':False,'testflight':False,'productionChanged':False},indent=2))
           PY
       - name: Preserve native evidence and readable source
         if: always()
