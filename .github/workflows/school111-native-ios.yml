@@ -1,4 +1,7 @@
-name: School111 native signing and Keychain acceptance
+name: School111 native Keychain acceptance replay
+# Focused replay for the already-compiled candidate. Full build recipe and
+# successful production startup are pinned at commit 2d18f6d8cb42c44a72f36f24880225ea5444625d.
+# Runtime changes cannot be validated by this replay; they require a new native build.
 on:
   push:
     branches: [fix/school111-ios-keychain-release]
@@ -13,12 +16,10 @@ concurrency:
 jobs:
   ios:
     runs-on: macos-26
-    timeout-minutes: 45
+    timeout-minutes: 25
     env:
       CI: '1'
       EXPO_NO_TELEMETRY: '1'
-      EXPO_PUBLIC_API_ORIGIN: https://school-188-225-38-55.sslip.io
-      EXPO_PUBLIC_MOBILE_SERVICES: 'false'
     steps:
       - uses: actions/checkout@v4
         with:
@@ -26,62 +27,35 @@ jobs:
           sparse-checkout: mobile/school111
       - uses: actions/download-artifact@v4
         with:
-          name: school111-native-source-and-proof
-          run-id: 36262379555
+          name: school111-keychain-fixed-source-and-proof
+          run-id: 36268330034
           github-token: ${{ github.token }}
-          path: input
+          path: input/source
+      - uses: actions/download-artifact@v4
+        with:
+          name: school111-production-origin-simulator
+          run-id: 36268330034
+          github-token: ${{ github.token }}
+          path: input/app
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - name: Verify source and apply bounded fix
-        run: |
-          python3 - <<'PY'
-          import pathlib,zipfile,hashlib
-          p=pathlib.Path('input/school111-native-ios-candidate.zip')
-          assert hashlib.sha256(p.read_bytes()).hexdigest()=='55fd689db630045c08194e3681220a70cca62b2a66c3ef1f81b6d20660689e2f'
-          with zipfile.ZipFile(p) as z:
-            for n in z.namelist():
-              pp=pathlib.PurePosixPath(n);assert not pp.is_absolute() and '..' not in pp.parts
-            z.extractall('work')
-          PY
-          mv work/school111-native native-app
-          python3 mobile/school111/apply-keychain-fix.py native-app
-          mkdir -p native-app/ci
-          cp mobile/school111/NativeDiaryTests.swift native-app/ci/
-          cp mobile/school111/add-ui-tests.rb native-app/ci/
-          cp mobile/school111/fixture-server.mts native-app/fixture-server.mts
-      - name: Reproducible install and application checks
+      - name: Verify exact native artifact and correct tab locator
+        run: python3 mobile/school111/replay-prepare.py
+      - name: Check unchanged source and build lightweight native test host
         working-directory: native-app
         run: |
           set -o pipefail
-          npm ci --ignore-scripts --no-audit --no-fund 2>&1 | tee proof/install.log
+          npm ci --ignore-scripts --no-audit --no-fund > proof/install.log 2>&1
           npm run typecheck 2>&1 | tee proof/typecheck.log
           npm test 2>&1 | tee proof/unit-tests.log
           npm run test:backend 2>&1 | tee proof/backend-tests.log
           npm run test:release 2>&1 | tee proof/release-tests.log
-          npx expo install --check 2>&1 | tee proof/expo-compatibility.log
-          xcodebuild -version | tee proof/xcode-version.log
-      - name: Generate Xcode project with native UI tests
+          ruby ci/replay-harness.rb
+          xcodebuild -project ci/harness/AcceptanceHost.xcodeproj -scheme NativeAcceptance -configuration Release -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' -derivedDataPath harness-build CODE_SIGN_IDENTITY=- DEVELOPMENT_TEAM= -jobs 3 build-for-testing 2>&1 | tee proof/harness-build.log
+      - name: Native startup of the exact production-origin app
         working-directory: native-app
-        run: |
-          set -o pipefail
-          npx expo prebuild --platform ios --no-install 2>&1 | tee proof/prebuild.log
-          ruby ci/add-ui-tests.rb
-          cd ios
-          pod install 2>&1 | tee ../proof/pod-install.log
-      - name: Build with Xcode simulator signing, not post-signing
-        working-directory: native-app
-        run: |
-          set -o pipefail
-          xcodebuild -workspace ios/111.xcworkspace -scheme School111Acceptance -configuration Release -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' -derivedDataPath native-build CODE_SIGN_IDENTITY=- DEVELOPMENT_TEAM= -jobs 3 build-for-testing 2>&1 | tee proof/xcode-build.log
-          app=native-build/Build/Products/Release-iphonesimulator/111.app
-          test -d "$app"
-          otool -s __TEXT __entitlements "$app/111" > proof/simulated-entitlements.txt
-          test $(wc -c < proof/simulated-entitlements.txt) -gt 100
-          codesign --verify --deep --strict --verbose=2 "$app" 2>&1 | tee proof/signature-verification.log
-          ditto -c -k --sequesterRsrc --keepParent "$app" school111-production-origin-simulator.app.zip
-      - name: Boot simulator and test production login startup
-        working-directory: native-app
+        timeout-minutes: 8
         run: |
           set -o pipefail
           device=$(xcrun simctl list devices available -j | python3 -c 'import sys,json;d=json.load(sys.stdin);a=[x for g in d["devices"].values() for x in g if x.get("isAvailable") and x["name"].startswith("iPhone")];assert a;print(a[0]["udid"])')
@@ -89,64 +63,80 @@ jobs:
           xcrun simctl boot "$device" || true
           xcrun simctl bootstatus "$device" -b
           xcrun simctl status_bar "$device" override --time '9:41' --dataNetwork wifi --wifiMode active --wifiBars 3 --batteryState charged --batteryLevel 100
-          xcodebuild -workspace ios/111.xcworkspace -scheme School111Acceptance -configuration Release -destination "platform=iOS Simulator,id=$device" -derivedDataPath native-build -resultBundlePath proof/production-startup.xcresult -only-testing:School111UITests/StartupTests CODE_SIGN_IDENTITY=- DEVELOPMENT_TEAM= test-without-building 2>&1 | tee proof/production-startup.log
+          codesign --verify --deep --strict --verbose=2 ci/real-production-app/111.app 2>&1 | tee proof/signature-verification.log
+          xcrun simctl install "$device" ci/real-production-app/111.app
+          xcodebuild -project ci/harness/AcceptanceHost.xcodeproj -scheme NativeAcceptance -configuration Release -destination "platform=iOS Simulator,id=$device" -derivedDataPath harness-build -parallel-testing-enabled NO -resultBundlePath proof/production-startup.xcresult -only-testing:School111UITests/StartupTests CODE_SIGN_IDENTITY=- DEVELOPMENT_TEAM= test-without-building 2>&1 | tee proof/production-startup.log
           xcrun simctl launch "$device" ru.arthello.school111
           sleep 3
           xcrun simctl io "$device" screenshot preview/production-login-fixed.png
-      - name: Prepare isolated TLS fixture for native session testing
+      - name: Configure isolated native QA without changing the production artifact
         working-directory: native-app
         run: |
-          mkdir -p ci/tls
+          mkdir -p ci/tls ci/qa-app
           openssl req -x509 -newkey rsa:2048 -sha256 -nodes -days 2 -subj '/CN=localhost' -addext 'subjectAltName=DNS:localhost,IP:127.0.0.1' -addext 'basicConstraints=critical,CA:TRUE' -keyout ci/tls/key.pem -out ci/tls/cert.pem
           xcrun simctl keychain "$(cat proof/simulator-id.txt)" add-root-cert ci/tls/cert.pem
-      - name: Build QA configuration and exercise real native Keychain
+          ditto ci/real-production-app/111.app ci/qa-app/111.app
+          python3 - <<'PY'
+          import pathlib,json,hashlib
+          src=pathlib.Path('ci/real-production-app/111.app');dst=pathlib.Path('ci/qa-app/111.app')
+          p=dst/'EXConstants.bundle/app.config';d=json.loads(p.read_text());assert d['extra']['apiOrigin']=='https://school-188-225-38-55.sslip.io';d['extra']['apiOrigin']='https://localhost:8843';p.write_text(json.dumps(d))
+          files=['111','main.jsbundle'];h={}
+          for n in files:
+            a=hashlib.sha256((src/n).read_bytes()).hexdigest();b=hashlib.sha256((dst/n).read_bytes()).hexdigest();assert a==b;h[n]=a
+          pathlib.Path('proof/qa-runtime-code-hashes.json').write_text(json.dumps({'codeIdenticalToProductionArtifact':True,'sha256':h,'onlyResourceOverride':'EXConstants.bundle/app.config extra.apiOrigin','qaOrigin':'https://localhost:8843'},indent=2))
+          PY
+          # Preserve the already-correct simulated Mach-O entitlements. No new
+          # iOS entitlements are added to the macOS simulator code signature.
+          codesign --force --sign - --preserve-metadata=identifier,entitlements,requirements --timestamp=none ci/qa-app/111.app
+          codesign --verify --deep --strict --verbose=2 ci/qa-app/111.app
+          otool -s __TEXT __entitlements ci/real-production-app/111.app/111 | tail -n +2 > proof/production-entitlements.hex
+          otool -s __TEXT __entitlements ci/qa-app/111.app/111 | tail -n +2 > proof/qa-entitlements.hex
+          diff -u proof/production-entitlements.hex proof/qa-entitlements.hex
+          xcrun simctl terminate "$(cat proof/simulator-id.txt)" ru.arthello.school111 || true
+          xcrun simctl install "$(cat proof/simulator-id.txt)" ci/qa-app/111.app
+      - name: Verify real Keychain persistence, logout and native diary UI
         working-directory: native-app
-        env:
-          EXPO_PUBLIC_API_ORIGIN: https://localhost:8843
+        timeout-minutes: 10
         run: |
           set -o pipefail
           device=$(cat proof/simulator-id.txt)
           node --experimental-transform-types fixture-server.mts > proof/fixture-server.log 2>&1 &
           fixture=$!
           trap 'curl --cacert ci/tls/cert.pem -s https://localhost:8843/test/stats > proof/native-fixture-final.json || true; kill "$fixture" 2>/dev/null || true' EXIT
-          xcrun simctl terminate "$device" ru.arthello.school111 || true
-          # Expo embeds current app.config values in its generated Constants resource.
-          # Touch the generator input so this incremental build cannot reuse prod config.
-          touch app.config.js
-          xcodebuild -workspace ios/111.xcworkspace -scheme School111Acceptance -configuration Release -destination "platform=iOS Simulator,id=$device" -derivedDataPath native-build -resultBundlePath proof/native-diary.xcresult -only-testing:School111UITests/NativeDiaryTests CODE_SIGN_IDENTITY=- DEVELOPMENT_TEAM= -jobs 3 test 2>&1 | tee proof/native-diary.log
+          xcodebuild -project ci/harness/AcceptanceHost.xcodeproj -scheme NativeAcceptance -configuration Release -destination "platform=iOS Simulator,id=$device" -derivedDataPath harness-build -parallel-testing-enabled NO -resultBundlePath proof/native-diary.xcresult -only-testing:School111UITests/NativeDiaryTests CODE_SIGN_IDENTITY=- DEVELOPMENT_TEAM= test-without-building 2>&1 | tee proof/native-diary.log
           curl --cacert ci/tls/cert.pem -fsS https://localhost:8843/test/stats > proof/native-fixture-final.json
           python3 - <<'PY'
           import json,pathlib
           s=json.loads(pathlib.Path('proof/native-fixture-final.json').read_text())
-          assert s['loginAccepted']>=3 and s['loginRejected']>=1 and s['logout']>=1 and s['cookiesObserved'] and s['authenticatedReads']>=8, s
-          pathlib.Path('proof/native-verdict.json').write_text(json.dumps({'productionStartup':'PASS','nativeSessionScenario':'PASS','storage':'actual iOS simulator Keychain','transport':'native HTTPS to isolated fixture','fictionalDataOnly':True,'realDevice':False,'signedDeviceIPA':False,'testflight':False,'productionChanged':False},indent=2))
+          assert s['loginAccepted']>=3 and s['loginRejected']>=1 and s['logout']>=1 and s['cookiesObserved'] and s['authenticatedReads']>=5 and s['unauthenticatedDenied']>=1,s
+          pathlib.Path('proof/native-verdict.json').write_text(json.dumps({'productionStartup':'PASS','nativeSessionScenario':'PASS','compiledBuildRun':36268330034,'storage':'actual iOS simulator Keychain','transport':'native HTTPS to isolated fixture','qaConfigOnlyOverride':True,'runtimeCodeUnchanged':True,'fictionalDataOnly':True,'realDevice':False,'signedDeviceIPA':False,'testflight':False,'productionChanged':False},indent=2))
           PY
-      - name: Export native UI attachments and readable sources
+      - name: Preserve native evidence and readable source
         if: always()
         run: |
           if [ -d native-app/proof/production-startup.xcresult ]; then xcrun xcresulttool export attachments --path native-app/proof/production-startup.xcresult --output-path native-app/preview/startup || true; fi
           if [ -d native-app/proof/native-diary.xcresult ]; then xcrun xcresulttool export attachments --path native-app/proof/native-diary.xcresult --output-path native-app/preview/diary || true; fi
           python3 - <<'PY'
-          import pathlib,zipfile,hashlib,json
+          import pathlib,zipfile,hashlib,json,shutil
           root=pathlib.Path('native-app')
           if not root.exists():raise SystemExit(0)
-          skip={'node_modules','Pods','native-build','.expo','.git','tls'}
+          shutil.copy('.github/workflows/school111-native-ios.yml',root/'ci/acceptance-replay.yml')
+          skip={'node_modules','Pods','harness-build','.expo','.git','tls','real-production-app','qa-app','prior-preview-r2'}
           files=[]
           for p in root.rglob('*'):
             if not p.is_file():continue
             r=p.relative_to(root)
             if any(t in skip or t.endswith('.xcresult') for t in r.parts) or p.suffix in {'.pem','.key','.p12','.mobileprovision','.ttf','.otf','.woff','.woff2','.db','.sqlite','.zip'} or p.name=='.xcode.env.local' or p.name.startswith('.env') and p.name!='.env.example':continue
             files.append(p)
-          hashes={str(p.relative_to(root)):hashlib.sha256(p.read_bytes()).hexdigest() for p in files}
-          h=root/'proof/file-hashes.json';h.parent.mkdir(exist_ok=True);h.write_text(json.dumps(hashes,indent=2));files.append(h)
-          with zipfile.ZipFile('school111-ios-keychain-fixed-source.zip','w',zipfile.ZIP_DEFLATED) as z:
+          h=root/'proof/file-hashes.json';h.write_text(json.dumps({str(p.relative_to(root)):hashlib.sha256(p.read_bytes()).hexdigest() for p in files},indent=2));files.append(h)
+          with zipfile.ZipFile('school111-ios-native-verified-source.zip','w',zipfile.ZIP_DEFLATED) as z:
             for p in files:z.write(p,'school111-native/'+str(p.relative_to(root)))
           PY
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: school111-keychain-fixed-source-and-proof
-          path: school111-ios-keychain-fixed-source.zip
+          name: school111-native-verified-source-and-proof
+          path: school111-ios-native-verified-source.zip
           retention-days: 30
           if-no-files-found: warn
       - uses: actions/upload-artifact@v4
@@ -155,11 +145,4 @@ jobs:
           name: school111-production-origin-simulator
           path: native-app/school111-production-origin-simulator.app.zip
           retention-days: 30
-          if-no-files-found: warn
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: school111-native-xcresults
-          path: native-app/proof/*.xcresult
-          retention-days: 14
           if-no-files-found: warn

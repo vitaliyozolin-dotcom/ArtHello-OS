@@ -1,0 +1,9 @@
+# Acceptance replay of the exact compiled native candidate
+
+Build 36268330034 fixed simulator signing, compiled the native app, passed 58 logic checks and passed XCTest production startup/relaunch with no Keychain error. Its native diary test failed after successful native login because XCTest incorrectly searched for role=tab as a UIKit Button. The captured native hierarchy shows tab-home as Other, and the HTTPS fixture recorded successful authentication and a cookie-bearing diary read. The test locator is corrected without removing assertions or changing application code.
+
+This branch reuses the SHA-verified compiled app from that run and a small independent XCTest host to avoid rebuilding React Native for a test-locator correction. The app is always addressed by its real bundle ID ru.arthello.school111. The empty acceptance host is not the app under test and is never shipped as the diary.
+
+Production startup tests use the unmodified production-origin artifact. Session and diary tests use a disposable copy with only its Expo Constants apiOrigin resource changed to localhost HTTPS. Native executable and JS bundle hashes are compared before re-signing. Existing simulated entitlements remain unchanged. This QA copy is excluded from exported application artifacts. Tests run serially on the exact simulator holding the local TLS trust root.
+
+The full native build recipe is retained in Git at 2d18f6d8cb42c44a72f36f24880225ea5444625d, .github/workflows/school111-native-ios.yml. Runtime/source changes require a fresh full build, not this pinned replay. The workflow is isolated to the fix branch, uses read-only repository/action permissions and no Apple credentials, and performs no production action. Persist the source and proof before CI artifact expiry. Store gates, real-device checks, publisher identity and live backend acceptance are not bypassed.
