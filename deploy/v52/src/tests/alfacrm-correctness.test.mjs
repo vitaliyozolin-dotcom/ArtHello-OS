@@ -58,7 +58,7 @@ async function setup(t) {
     INSERT INTO organization_branches VALUES('BR-SCHOOL','School','Активен',1),('BR-NURSERY','Nursery','Активен',2);
     CREATE TABLE entities(id TEXT PRIMARY KEY,entity_type TEXT,display_name TEXT,status TEXT,source_system TEXT,source_record_id TEXT,data_quality TEXT,scope TEXT,metadata TEXT,created_by TEXT,created_at TEXT,updated_at TEXT);
     CREATE TABLE entity_merges(survivor_id TEXT,duplicate_id TEXT UNIQUE,reason TEXT,created_by TEXT);
-    CREATE TABLE education_lessons(id TEXT PRIMARY KEY,teacher_entity_id TEXT,substitute_entity_id TEXT);
+    CREATE TABLE education_lessons(id TEXT PRIMARY KEY,teacher_entity_id TEXT,substitute_entity_id TEXT,group_id TEXT,program_id TEXT,scheduled_at TEXT,topic TEXT,room TEXT,status TEXT,homework TEXT,created_at TEXT,updated_at TEXT);
     CREATE TABLE entity_links(from_entity_id TEXT,to_entity_id TEXT,relation_type TEXT,created_by TEXT,UNIQUE(from_entity_id,to_entity_id,relation_type));
     CREATE TABLE audit_events(actor TEXT,action TEXT,entity_type TEXT,entity_id TEXT,payload TEXT);
     CREATE TABLE integration_connections(id TEXT,owner_entity_id TEXT,status TEXT,auth_status TEXT,verified_transfer INTEGER,is_enabled INTEGER,last_success_at TEXT,next_sync_at TEXT,error_count INTEGER,updated_at TEXT,received_count INTEGER,accepted_count INTEGER,rejected_count INTEGER);
@@ -1140,18 +1140,15 @@ test('a confirmed root survives a separately imported third-branch copy with a s
 test('lesson rejection reports bounded aggregate reasons without source details',async t=>{
  const {state}=await setup(t);
  const result=await route.canonicalizeLessons([
-  {remoteBranchId:'1',item:{id:1,group_id:5,date:'2026-09-01'}},
   {remoteBranchId:'1',item:{id:2,group_id:5}},
   {remoteBranchId:'1',item:{id:3,date:'2026-09-01'}},
  ],state,'TEST');
- assert.deepEqual(result,{accepted:0,rejected:3,rejectionReasons:{missingGroup:1,missingDate:1,unknownGroup:1}});
+ assert.deepEqual(result,{accepted:0,rejected:2,rejectionReasons:{missingGroup:1,missingDate:1,unknownGroup:0},unresolvedGroupLinks:0});
  assert.doesNotMatch(JSON.stringify(result),/2026-09-01|"id"/);
 });
 
 test('one Alfa lesson with group_ids projects to each verified current group',async t=>{
  const {sql,state}=await setup(t);const {createHash}=await import('node:crypto');
- for(const column of ['group_id','program_id','scheduled_at','topic','room','status','homework','created_at','updated_at'])
-  sql.exec(`ALTER TABLE education_lessons ADD COLUMN ${column} TEXT`);
  sql.exec("INSERT INTO education_programs(id,title) VALUES('P1','Program')");
  for(const remoteId of [5,6]){
   const id=`GRP-A-${createHash('sha256').update(`1:${remoteId}`).digest('hex').slice(0,16).toUpperCase()}`;
@@ -1164,12 +1161,11 @@ test('one Alfa lesson with group_ids projects to each verified current group',as
  assert.equal(result.accepted,1);
  assert.equal(result.rejected,0);
  assert.equal(sql.prepare('SELECT count(*) AS n FROM education_lessons').get().n,2);
+ assert.equal(sql.prepare('SELECT count(*) AS n FROM alfacrm_lesson_facts').get().n,1,'two group views are one source lesson');
 });
 
 test('repeated lesson import preserves teacher homework while updating source schedule',async t=>{
  const {sql,state}=await setup(t);const {createHash}=await import('node:crypto');
- for(const column of ['group_id','program_id','scheduled_at','topic','room','status','homework','created_at','updated_at'])
-  sql.exec(`ALTER TABLE education_lessons ADD COLUMN ${column} TEXT`);
  const groupId=`GRP-A-${createHash('sha256').update('1:5').digest('hex').slice(0,16).toUpperCase()}`;
  sql.prepare("INSERT INTO education_groups(id,program_id) VALUES(?,'P1')").run(groupId);
  sql.exec("INSERT INTO alfacrm_import_batches(id,module,scope,status,created_at) VALUES('HW1','lessons','{}','projecting','2026-09-01')");
@@ -1219,6 +1215,64 @@ test('lesson snapshot rejects ignored status and out-of-period source responses'
 });
 
 
+test('one source lesson preserves individual and historical links without inventing groups',async t=>{
+ const {sql,state}=await setup(t);
+ sql.exec("INSERT INTO alfacrm_import_batches(id,module,scope,status,created_at) VALUES('FACT1','lessons','{}','projecting','2026-09-01')");
+ const rows=[
+  {remoteBranchId:'1',item:{id:91,date:'2026-09-01',time_from:'09:00',time_to:'09:45',group_ids:[],customer_ids:[10,11],teacher_ids:[20,21],subject_id:30,room_id:40,status:1}},
+  {remoteBranchId:'1',item:{id:92,date:'2026-09-01',time_from:'10:00',group_ids:[999],customer_ids:[10],teacher_ids:[20],status:2}},
+ ];
+ await route.upsertRawRecords('lessons',rows,'FACT1');
+ const result=await route.canonicalizeLessons(rows,state,'TEST');
+ assert.equal(result.accepted,2);
+ assert.equal(result.rejected,0);
+ assert.equal(result.unresolvedGroupLinks,1);
+ assert.equal(sql.prepare('SELECT count(*) n FROM education_groups').get().n,0);
+ assert.equal(sql.prepare('SELECT count(*) n FROM education_lessons').get().n,0);
+ const fact=sql.prepare("SELECT * FROM alfacrm_lesson_facts WHERE source_lesson_id='91'").get();
+ assert.deepEqual(JSON.parse(fact.customer_ids),['10','11']);
+ assert.deepEqual(JSON.parse(fact.teacher_ids),['20','21']);
+ assert.deepEqual(JSON.parse(fact.group_ids),[]);
+ assert.equal(fact.subject_id,'30');assert.equal(fact.room_id,'40');
+ assert.equal(fact.scheduled_at,'2026-09-01T06:00:00.000Z');
+ assert.equal(fact.ends_at,'2026-09-01T06:45:00.000Z');
+ assert.equal(fact.source_status,'1');
+ assert.equal(sql.prepare("SELECT count(*) n FROM alfacrm_projection_lineage WHERE projection_table='alfacrm_lesson_facts'").get().n,2);
+ await route.canonicalizeLessons(rows,state,'TEST');
+ assert.equal(sql.prepare('SELECT count(*) n FROM alfacrm_lesson_facts').get().n,2);
+ assert.equal(sql.prepare("SELECT ends_at FROM alfacrm_lesson_facts WHERE source_lesson_id='92'").get().ends_at,null);
+});
+
+
+test('invalid source lesson time cannot silently become midnight or overwrite a fact',async t=>{
+ const {sql,state}=await setup(t);
+ sql.exec("INSERT INTO alfacrm_import_batches(id,module,scope,status,created_at) VALUES('BADTIME','lessons','{}','projecting','2026-09-01')");
+ const rows=[{remoteBranchId:'1',item:{id:93,date:'2026-09-01',time_from:'24:99',customer_ids:[10],teacher_ids:[20]}}];
+ await route.upsertRawRecords('lessons',rows,'BADTIME');
+ await assert.rejects(route.canonicalizeLessons(rows,state,'TEST'),/время занятия/);
+ assert.equal(sql.prepare('SELECT count(*) n FROM alfacrm_lesson_facts').get().n,0);
+ assert.equal(sql.prepare('SELECT count(*) n FROM alfacrm_raw_observations').get().n,1);
+});
+
+
+test('lesson facts migration is additive and idempotent over immutable source evidence',async t=>{
+ const {sql,state}=await setup(t);
+ sql.exec("INSERT INTO alfacrm_import_batches(id,module,scope,status,created_at) VALUES('MIGRATION','lessons','{}','projecting','2026-09-01')");
+ const rows=[{remoteBranchId:'1',item:{id:94,date:'2026-09-01',customer_ids:[10]}},{remoteBranchId:'2',item:{id:94,date:'2026-09-01',customer_ids:[10]}}];
+ await route.upsertRawRecords('lessons',rows,'MIGRATION');
+ await route.canonicalizeLessons(rows,state,'TEST');
+ const before=sql.prepare('SELECT * FROM alfacrm_lesson_facts ORDER BY id').all();
+ const raw=sql.prepare('SELECT * FROM alfacrm_raw_observations ORDER BY id').all();
+ await route.ensureAlfaTables();await route.ensureAlfaTables();
+ assert.deepEqual(sql.prepare('SELECT * FROM alfacrm_lesson_facts ORDER BY id').all(),before);
+ assert.deepEqual(sql.prepare('SELECT * FROM alfacrm_raw_observations ORDER BY id').all(),raw);
+ assert.equal(before.length,2,'same source lesson ID in different branches remains distinct');
+ assert.equal(before[0].teacher_ids,null,'missing teacher list remains unknown');
+ assert.equal(before[0].scheduled_at,null,'missing time remains unknown');
+ assert.throws(()=>sql.exec("DELETE FROM alfacrm_raw_observations"),/append-only/);
+});
+
+
 test('reverse lesson status move cannot silently disappear from a complete snapshot',async t=>{
  await setup(t);let reads=0;
  mockRecords({'1/lesson/index':body=>{
@@ -1227,4 +1281,30 @@ test('reverse lesson status move cannot silently disappear from a complete snaps
   return Response.json({items,total:items.length});
  }});
  await assert.rejects(route.fetchModuleRecords(session,'lessons',['1'],{dateFrom:'2026-09-01',dateTo:'2026-09-30'}),/изменился между/);
+});
+
+
+test('plural lesson relationships reject scalar and object response drift before writes',async t=>{
+ const {sql,state}=await setup(t);
+ for(const malformed of [{teacher_ids:20},{customer_ids:{id:10}},{group_ids:5}]) {
+  await assert.rejects(route.canonicalizeLessons([{remoteBranchId:'1',item:{id:99,date:'2026-09-01',customer_ids:[10],...malformed}}],state,'TEST'),/связи занятия/);
+ }
+ assert.equal(sql.prepare('SELECT count(*) n FROM alfacrm_lesson_facts').get().n,0);
+});
+
+test('group lesson becoming individual archives only stale source projections and preserves homework',async t=>{
+ const {sql,state}=await setup(t);const {createHash}=await import('node:crypto');
+ const groupId=`GRP-A-${createHash('sha256').update('1:5').digest('hex').slice(0,16).toUpperCase()}`;
+ sql.prepare("INSERT INTO education_groups(id,program_id) VALUES(?,'P1')").run(groupId);
+ sql.exec("INSERT INTO alfacrm_import_batches(id,module,scope,status,created_at) VALUES('MOVE','lessons','{}','projecting','2026-09-01')");
+ const rows=[{remoteBranchId:'1',item:{id:99,date:'2026-09-01',group_ids:[5],customer_ids:[10],status:1}}];
+ await route.upsertRawRecords('lessons',rows,'MOVE');await route.canonicalizeLessons(rows,state,'TEST');
+ sql.exec("UPDATE education_lessons SET homework='Confirmed homework'; INSERT INTO education_lessons(id,status) VALUES('MANUAL','1')");
+ rows[0].item.group_ids=[];
+ await route.canonicalizeLessons(rows,state,'TEST');
+ const legacy=sql.prepare("SELECT * FROM education_lessons WHERE id!='MANUAL'").get();
+ assert.equal(legacy.status,'Архив');assert.equal(legacy.homework,'Confirmed homework');
+ assert.equal(sql.prepare("SELECT status FROM education_lessons WHERE id='MANUAL'").get().status,'1');
+ assert.equal(sql.prepare('SELECT count(*) n FROM alfacrm_lesson_facts').get().n,1);
+ assert.equal(sql.prepare("SELECT count(*) n FROM alfacrm_projection_lineage WHERE projection_table='education_lessons'").get().n,1,'historical lineage remains');
 });
