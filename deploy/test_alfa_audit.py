@@ -11,6 +11,15 @@ from unittest.mock import patch
 spec=importlib.util.spec_from_file_location('audit',Path(__file__).with_name('alfa_audit.py'))
 audit=importlib.util.module_from_spec(spec);spec.loader.exec_module(audit)
 
+class CentralSourceTests(unittest.TestCase):
+    def test_confirmed_release85_and_current_controller_are_accepted(self):
+        audit.verify_central_source('49cea8d5f69d356e16c6aa88ecc8a7e93cef417d','c'*40)
+        audit.verify_central_source('c'*40,'c'*40)
+
+    def test_unconfirmed_runtime_never_reaches_bank_audit(self):
+        with self.assertRaisesRegex(audit.release.Refused,'CENTRAL_SOURCE'):
+            audit.verify_central_source('f'*40,'c'*40)
+
 class SchoolPinTests(unittest.TestCase):
     def probe(self, fingerprint):
         calls=[]
