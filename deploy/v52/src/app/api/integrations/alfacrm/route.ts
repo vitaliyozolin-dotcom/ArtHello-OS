@@ -52,6 +52,7 @@ type ModuleState = {
   status: "not_started" | "previewed" | "importing" | "imported" | "error";
   previewCount: number;
   importedCount: number;
+  subscriptionCount?: number;
   lastPreviewAt: string;
   lastImportAt: string;
   previewToken: string;
@@ -293,8 +294,15 @@ async function storedScopeAudit() {
     SUM(CASE WHEN teacher_ids IS NULL THEN 1 ELSE 0 END) AS unknownTeacherLists,
     SUM(CASE WHEN scheduled_at IS NULL OR ends_at IS NULL THEN 1 ELSE 0 END) AS unknownTimes,
     MAX(observed_at) AS lastObservedAt FROM alfacrm_lesson_facts GROUP BY remote_branch_id`).all();
+  const subscriptionFacts = await env.DB.prepare(`SELECT remote_branch_id AS remoteBranchId,
+    SUM(source_present) AS sourceSubscriptions,COUNT(DISTINCT CASE WHEN source_present=1 THEN customer_id END) AS customersWithSubscriptions,
+    SUM(CASE WHEN source_present=0 THEN 1 ELSE 0 END) AS historicalSubscriptions,
+    SUM(CASE WHEN source_present=1 AND source_balance IS NULL THEN 1 ELSE 0 END) AS unknownSourceBalances,
+    MIN(CASE WHEN source_present=1 THEN observed_at END) AS oldestObservedAt,MAX(observed_at) AS lastObservedAt
+    FROM alfacrm_subscription_facts GROUP BY remote_branch_id`).all();
   return { source: 'Последние сохранённые ответы AlfaCRM', modules: report, familyCardsByStatus: familyCounts.results ?? [],
     lessonFacts: lessonFacts.results ?? [],
+    subscriptionFacts: subscriptionFacts.results ?? [],
     note: 'Уникальные ID клиентов не равны уникальным семьям: несколько детей могут иметь одного представителя. Текущее состояние AlfaCRM подтверждается новой полной загрузкой.' };
 }
 
@@ -683,6 +691,7 @@ async function importModule(context: ImportContext, body: Record<string, unknown
   let accepted = 0;
   let rejected = 0;
   let invalidBalanceCount = 0;
+  let subscriptionRecords = 0;
   let projectionBlocked = false;
   let lessonRejectionReasons: { missingGroup: number; missingDate: number; unknownGroup: number } | undefined;
   let unresolvedLessonGroupLinks = 0;
@@ -695,7 +704,7 @@ async function importModule(context: ImportContext, body: Record<string, unknown
     lessonRejectionReasons = result.rejectionReasons;
     unresolvedLessonGroupLinks = result.unresolvedGroupLinks;
   }
-  if (module === "subscriptions") ({ accepted, rejected, invalidBalanceCount } = await canonicalizeSubscriptions(projectionRows, state));
+  if (module === "subscriptions") ({ accepted, rejected, invalidBalanceCount, subscriptionRecords } = await canonicalizeSubscriptions(projectionRows, state));
   if (module === "finance") ({ accepted, rejected, projectionBlocked } = await canonicalizeFinance(projectionRows));
 
   // Only a fully fetched and fully accepted snapshot proves that missing records departed.
@@ -722,6 +731,7 @@ async function importModule(context: ImportContext, body: Record<string, unknown
     previewToken: complete || rejected > 0 ? "" : storedModule.previewToken,
     previewSignature: complete || rejected > 0 ? "" : storedModule.previewSignature,
     importedCount,
+    ...(module === "subscriptions" ? { subscriptionCount: (storedModule.status === "importing" ? storedModule.subscriptionCount ?? 0 : 0) + subscriptionRecords } : {}),
     lastImportAt: current,
     cursor: complete || rejected > 0 ? 0 : nextCursor,
     dateFrom: params.dateFrom,
@@ -764,6 +774,7 @@ async function importModule(context: ImportContext, body: Record<string, unknown
     rejected,
     ...(lessonRejectionReasons ? { lessonRejectionReasons, unresolvedLessonGroupLinks } : {}),
     invalidBalanceCount,
+    ...(module === "subscriptions" ? { subscriptionRecords } : {}),
     projectionBlocked,
     complete: complete && !projectionBlocked,
     nextCursor,
@@ -1221,6 +1232,22 @@ async function ensureAlfaTables() {
     )`),
     // Additive v2 projection. The legacy tariff table is retained for evidence,
     // but no longer written or used as a monetary source.
+    env.DB.prepare(`CREATE TABLE IF NOT EXISTS alfacrm_subscription_facts (
+      id TEXT PRIMARY KEY,
+      remote_branch_id TEXT NOT NULL,
+      local_branch_id TEXT NOT NULL,
+      customer_id TEXT NOT NULL,
+      source_tariff_id TEXT NOT NULL,
+      family_entity_id TEXT NOT NULL,
+      tariff_id TEXT,
+      valid_from TEXT,
+      valid_to TEXT,
+      source_balance TEXT,
+      source_payload TEXT NOT NULL,
+      source_present INTEGER NOT NULL CHECK(source_present IN (0,1)),
+      observed_at TEXT NOT NULL,
+      UNIQUE(remote_branch_id,customer_id,source_tariff_id)
+    )`),
     env.DB.prepare(`CREATE TABLE IF NOT EXISTS alfacrm_customer_balances (
       remote_branch_id TEXT NOT NULL,
       local_branch_id TEXT NOT NULL,
@@ -1669,6 +1696,7 @@ async function canonicalizeSubscriptions(rows: FetchedRecord[], state: AlfaState
   let accepted = 0;
   let rejected = 0;
   let invalidBalanceCount = 0;
+  let subscriptionRecords = 0;
   for (const { remoteBranchId, item } of rows) {
     const customerId = scalar(item.customer_id);
     const customer = record(item.customer);
@@ -1676,7 +1704,42 @@ async function canonicalizeSubscriptions(rows: FetchedRecord[], state: AlfaState
     if (!customerId || !familyId || item.source_contract !== SUBSCRIPTION_SOURCE_CONTRACT
       || item.id !== `${SUBSCRIPTION_SOURCE_CONTRACT}:${customerId}`
       || (customer && scalar(customer.id) !== customerId)) { rejected += 1; continue; }
-    const balanceMinor = customerBalanceMinor(customer?.balance);
+    if (!customer) { rejected += 1; invalidBalanceCount += 1; continue; }
+    // Validate the entire customer's tariff snapshot before reconciling presence.
+    // Source balance is preserved verbatim: it is not a confirmed money unit.
+    if (!Array.isArray(item.tariffs)) throw new AlfaApiError('AlfaCRM не подтвердила список абонементов.');
+    const tariffs = item.tariffs.map(record);
+    const seen = new Set<string>();
+    for (const tariff of tariffs) {
+      const id = scalar(tariff?.id);
+      if (!tariff || !id || seen.has(id) || (tariff.customer_id !== undefined && scalar(tariff.customer_id) !== customerId))
+        throw new AlfaApiError('AlfaCRM не подтвердила уникальность или владельца абонемента.');
+      seen.add(id);
+    }
+    for (const value of tariffs) {
+      const tariff = value!;
+      const id = JSON.stringify([remoteBranchId, customerId, scalar(tariff.id)]);
+      const sourceDate = (value: unknown) => {
+        const date = isoDate(value);
+        const parsed = new Date(`${date}T00:00:00Z`);
+        return date && !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0,10) === date ? date : null;
+      };
+      statements.push(env.DB.prepare(`INSERT INTO alfacrm_subscription_facts
+        (id,remote_branch_id,local_branch_id,customer_id,source_tariff_id,family_entity_id,tariff_id,valid_from,valid_to,source_balance,source_payload,source_present,observed_at)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,1,?) ON CONFLICT(remote_branch_id,customer_id,source_tariff_id) DO UPDATE SET
+        local_branch_id=excluded.local_branch_id,family_entity_id=excluded.family_entity_id,tariff_id=excluded.tariff_id,
+        valid_from=excluded.valid_from,valid_to=excluded.valid_to,source_balance=excluded.source_balance,
+        source_payload=excluded.source_payload,source_present=1,observed_at=excluded.observed_at`)
+        .bind(id,remoteBranchId,state.branchMappings[remoteBranchId],customerId,scalar(tariff.id),familyId,
+          scalar(tariff.tariff_id) || null,sourceDate(tariff.b_date),sourceDate(tariff.e_date),
+          tariff.balance === undefined || tariff.balance === null ? null : JSON.stringify(tariff.balance),JSON.stringify(tariff),current));
+      statements.push(lineageStatement('alfacrm_subscription_facts',id,'subscriptions',remoteBranchId,scalar(item.id)));
+      subscriptionRecords += 1;
+    }
+    statements.push(env.DB.prepare(`UPDATE alfacrm_subscription_facts SET source_present=0
+      WHERE remote_branch_id=? AND customer_id=? AND source_tariff_id NOT IN (SELECT value FROM json_each(?))`)
+      .bind(remoteBranchId,customerId,JSON.stringify([...seen])));
+    const balanceMinor = customerBalanceMinor(customer.balance);
     if (balanceMinor === null) { rejected += 1; invalidBalanceCount += 1; continue; }
     // Lessons are an optional, separate integer fact. Missing/invalid is unknown.
     const rawLessons = customer?.paid_lesson_count;
@@ -1693,7 +1756,7 @@ async function canonicalizeSubscriptions(rows: FetchedRecord[], state: AlfaState
     accepted += 1;
   }
   await runBatches(statements);
-  return { accepted, rejected, invalidBalanceCount };
+  return { accepted, rejected, invalidBalanceCount, subscriptionRecords };
 }
 
 async function canonicalizeFinance(rows: FetchedRecord[]) {

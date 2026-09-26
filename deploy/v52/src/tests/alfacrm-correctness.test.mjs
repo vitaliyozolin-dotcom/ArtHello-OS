@@ -35,7 +35,7 @@ let source = stripTypeScriptTypes(readFileSync(resolve('app/api/integrations/alf
     assert.ok(adapters[name], `Unexpected dependency ${name}: update the explicit fixture adapter`);
     return `from "${adapters[name]}"`;
   });
-source += '\nexport {storedScopeAudit,defaultState,persistState,readState,ensureAlfaTables,upsertRawRecords,canonicalizeFamilies,canonicalizeStaff,canonicalizeGroups,canonicalizeLessons,canonicalizeFinance,importModule,previewModule,previewSignatureFor,normalizeEndpoint,alfaFetch,fetchPaged,fetchModuleRecords};\n//# sourceURL=alfacrm-correctness-fixture.mjs';
+source += '\nexport {storedScopeAudit,defaultState,persistState,readState,ensureAlfaTables,upsertRawRecords,canonicalizeFamilies,canonicalizeStaff,canonicalizeGroups,canonicalizeLessons,canonicalizeSubscriptions,canonicalizeFinance,importModule,previewModule,previewSignatureFor,normalizeEndpoint,alfaFetch,fetchPaged,fetchModuleRecords};\n//# sourceURL=alfacrm-correctness-fixture.mjs';
 const route = await import(dataModule(source));
 const branches = [{ id: 'BR-SCHOOL', name: 'School' }, { id: 'BR-NURSERY', name: 'Nursery' }];
 const session = { endpoint: 'https://fixture.s20.online', token: 'synthetic-token-for-tests', email: 'fixture@example.test', apiKey: 'synthetic-key', appKey: '' };
@@ -1307,6 +1307,48 @@ test('group lesson becoming individual archives only stale source projections an
  assert.equal(sql.prepare("SELECT status FROM education_lessons WHERE id='MANUAL'").get().status,'1');
  assert.equal(sql.prepare('SELECT count(*) n FROM alfacrm_lesson_facts').get().n,1);
  assert.equal(sql.prepare("SELECT count(*) n FROM alfacrm_projection_lineage WHERE projection_table='education_lessons'").get().n,1,'historical lineage remains');
+});
+
+test('each customer tariff has a stable independent fact and cannot be counted as a customer balance',async t=>{
+ const {sql}=await prepareSubscriptions(t);
+ const tariffs=[{id:11,customer_id:1,tariff_id:8,b_date:'01.09.2026',e_date:'30.09.2026',balance:4,note:'Source note'}, {id:12,customer_id:1,balance:null}];
+ mockRecords({'1/customer/index':[{id:1,balance:12.34}], '1/customer-tariff/index':tariffs});
+ let preview=await previewSubscriptions();let result=await importSubscriptions(preview.previewToken);
+ assert.equal(result.subscriptionRecords,2);
+ assert.equal(result.state.modules.subscriptions.subscriptionCount,2);
+ const facts=sql.prepare('SELECT * FROM alfacrm_subscription_facts ORDER BY source_tariff_id').all();
+ assert.equal(facts.length,2);
+ assert.equal(facts[0].tariff_id,'8');assert.equal(facts[0].valid_from,'2026-09-01');assert.equal(facts[0].valid_to,'2026-09-30');
+ assert.deepEqual(JSON.parse(facts[0].source_payload),tariffs[0]);
+ assert.equal(facts[1].tariff_id,null);assert.equal(facts[1].source_balance,null);
+ assert.equal(sql.prepare('SELECT balance_minor FROM alfacrm_customer_balances').get().balance_minor,1234);
+ assert.equal(sql.prepare("SELECT count(*) n FROM alfacrm_projection_lineage WHERE projection_table='alfacrm_subscription_facts'").get().n,2);
+ preview=await previewSubscriptions();result=await importSubscriptions(preview.previewToken);
+ assert.equal(result.state.modules.subscriptions.subscriptionCount,2);
+ assert.equal(sql.prepare('SELECT count(*) n FROM alfacrm_subscription_facts').get().n,2);
+ mockRecords({'1/customer/index':[{id:1,balance:null}], '1/customer-tariff/index':[tariffs[0]]});
+ preview=await previewSubscriptions();result=await importSubscriptions(preview.previewToken);
+ assert.equal(result.rejected,1,'unknown money remains rejected independently of tariff facts');
+ assert.equal(sql.prepare('SELECT balance_minor FROM alfacrm_customer_balances').get().balance_minor,1234);
+ assert.equal(sql.prepare('SELECT source_present FROM alfacrm_subscription_facts WHERE source_tariff_id=?').get('12').source_present,0);
+ assert.equal(sql.prepare('SELECT count(*) n FROM alfacrm_subscription_facts').get().n,2,'departed source tariffs retain history');
+});
+
+
+test('malformed tariff snapshots preserve the previous projection and repeated schema setup preserves facts',async t=>{
+ const {sql,state}=await prepareSubscriptions(t);
+ mockRecords({'1/customer/index':[{id:1,balance:12.34}], '1/customer-tariff/index':[{id:11,customer_id:1}]});
+ const preview=await previewSubscriptions();await importSubscriptions(preview.previewToken);
+ const before=sql.prepare('SELECT * FROM alfacrm_subscription_facts').all();
+ const wrapper={id:'customer-balance-v2:1',customer_id:1,source_contract:'customer-balance-v2',customer:{id:1,balance:0}};
+ for(const tariffs of [{id:11},[{id:11},{id:11}],[{id:11,customer_id:2}],[{}]]) {
+  await assert.rejects(route.canonicalizeSubscriptions([{remoteBranchId:'1',item:{...wrapper,tariffs}}],state),/абонемент/);
+  assert.deepEqual(sql.prepare('SELECT * FROM alfacrm_subscription_facts').all(),before);
+  assert.equal(sql.prepare('SELECT balance_minor FROM alfacrm_customer_balances').get().balance_minor,1234);
+ }
+ await route.ensureAlfaTables();await route.ensureAlfaTables();
+ assert.deepEqual(sql.prepare('SELECT * FROM alfacrm_subscription_facts').all(),before);
+ assert.throws(()=>sql.exec('DELETE FROM alfacrm_raw_observations'),/append-only/);
 });
 
 
