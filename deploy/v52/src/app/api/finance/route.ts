@@ -14,7 +14,7 @@ import {
   organizationBranches,
   userBranchAccess,
 } from "../../../db/schema";
-import { bankOperationPeriod, summarizeBankMonths, summarizeBankPeriod } from "../../../lib/bank-facts";
+import { selectBookedBankPeriod, bankOperationPeriod, summarizeBankMonths, summarizeBankPeriod } from "../../../lib/bank-facts";
 import { calculateForecast, summarizeCash, summarizePnl, type FinanceBudgetShape } from "../../../lib/finance";
 import { FINANCE_ACCOUNTING_START_DATE, FINANCE_ACCOUNTING_START_PERIOD, requireFinanceBranch, scopeFinanceOperations } from "../../../lib/finance-branch-scope";
 import { canAccessApi } from "../../../lib/access-policy";
@@ -178,8 +178,7 @@ export async function GET(request: Request) {
     const selectedPeriod = requestedPeriod && periods.includes(requestedPeriod)
       ? requestedPeriod
       : periods.at(-1) ?? (requestedPeriod && requestedPeriod >= FINANCE_ACCOUNTING_START_PERIOD ? requestedPeriod : defaultPeriod);
-    const bankOperations = sourceBankTransactions
-      .filter((operation) => bankOperationPeriod(operation.operationDate) === selectedPeriod && operation.currency === "RUB")
+    const bankOperations = selectBookedBankPeriod(sourceBankTransactions, selectedPeriod)
       .map((operation) => {
         const account = accountByProvider.get(`${operation.connectionId}:${operation.providerAccountId}`);
         return {

@@ -41,7 +41,7 @@ export function auditBank(db) {
       lastSuccessfulAt: iso(connection?.last_success_at), nextScheduledAt: iso(connection?.next_sync_at),
       timerNextAt: Number.isSafeInteger(timer?.nextAt) && timer.nextAt>0 && timer.nextAt<8640000000000000 ? new Date(timer.nextAt).toISOString() : null,
       consecutiveFailures: Number.isSafeInteger(timer?.failures) && timer.failures>=0 ? timer.failures : null,
-      outcome: ['complete','pending','busy','error'].includes(timer?.outcome) ? timer.outcome : null },
+      outcome: ['complete','pending','busy','review','error'].includes(timer?.outcome) ? timer.outcome : null },
   };
 }
 if(process.argv[1] === '-' || (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href)) {

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
-import { summarizeBankMonths, summarizeBankPeriod } from "../lib/bank-facts.ts";
+import { selectBookedBankPeriod, summarizeBankMonths, summarizeBankPeriod } from "../lib/bank-facts.ts";
 
 async function source(relative) {
   return readFile(new URL(relative, import.meta.url), "utf8");
@@ -53,4 +53,9 @@ test("Home and Money consume one bank summary while Acquiring cannot read bank f
 test("unconfirmed bank rows never count as money", () => {
   const base = { operationDate: "2026-09-01", direction: "Credit", amountMinor: 100, currency: "RUB" };
   assert.equal(summarizeBankPeriod([base, {...base,status:'Pending'}, {...base,status:'Rejected'}, {...base,status:'Booked'}], "2026-09").incomingMinor, 100);
+});
+
+test("history and total select the same booked rows", () => {
+  const rows = ['Booked','Pending','Rejected'].map(status=>({status,operationDate:'2026-09-01',currency:'RUB',direction:'Credit',amountMinor:100}));
+  assert.deepEqual(selectBookedBankPeriod(rows,'2026-09'),[rows[0]]);
 });
