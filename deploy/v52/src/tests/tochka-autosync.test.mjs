@@ -342,3 +342,16 @@ test('actual route preserves release-error precedence and clears handled fence f
     } finally { f.sqlite.close(); }
   }
 });
+
+test('review conflict waits for the normal slot and does not become busy or connection error', async () => {
+  const f = fixture();
+  try {
+    f.sqlite.exec("UPDATE integration_connections SET status='Требует проверки'");
+    const result = await runScheduledTochkaSync({ ...f.input, run: async () => new Response(null, { status: 423 }) });
+    assert.equal(result.outcome, 'review');
+    assert.equal(f.state().nextAt, nextTochkaAutomaticSlot(fixedNow, 60, 5));
+    assert.equal(f.sqlite.prepare('SELECT status FROM integration_connections').get().status,'Требует проверки');
+    f.advance(60_000);
+    assert.equal((await runScheduledTochkaSync({ ...f.input, run: async () => { throw Error('must not retry'); } })).ran,false);
+  } finally { f.sqlite.close(); }
+});

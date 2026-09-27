@@ -19,7 +19,7 @@ type Setup = {
 };
 type Connection = { status: string; isEnabled: boolean; nextSyncAt: string };
 type State = { version: 1; generation: string; owner: string; leasedUntil: number; nextAt: number; failures: number; outcome: string };
-type Outcome = 'complete' | 'pending' | 'busy' | 'error';
+type Outcome = 'complete' | 'pending' | 'busy' | 'review' | 'error';
 
 const failureStages = ['setup_references', 'credential_read', 'statement_state_open', 'bank_sync',
   'statement_fence', 'sync_commit', 'statement_acknowledge', 'statement_release',
@@ -152,7 +152,8 @@ export async function runScheduledTochkaSync(input: {
     const response = await input.run(observe);
     fallbackStage = 'response_result';
     httpStatus = response.status;
-    if (response.status === 409) outcome = 'busy';
+    if (response.status === 423) outcome = 'review';
+    else if (response.status === 409) outcome = 'busy';
     else if (response.ok) {
       fallbackStage = 'response_decode';
       const result = await response.json() as { test?: { ok?: boolean; complete?: boolean; rejectedCount?: number } };
@@ -169,7 +170,7 @@ export async function runScheduledTochkaSync(input: {
   failureStage = outcome === 'error' ? failureStage ?? 'response_result' : null;
   const finishedAt = clock();
   const failures = outcome === 'error' ? Math.min(next.failures + 1, 10) : 0;
-  const nextAt = outcome === 'complete' ? nextTochkaAutomaticSlot(finishedAt, setup.syncIntervalMinutes, setup.syncMinute)
+  const nextAt = outcome === 'complete' || outcome === 'review' ? nextTochkaAutomaticSlot(finishedAt, setup.syncIntervalMinutes, setup.syncMinute)
     : finishedAt + (outcome === 'pending' ? 5 * 60_000 : outcome === 'busy' ? 60_000
       : Math.min(6 * 60 * 60_000, 15 * 60_000 * 2 ** Math.min(failures - 1, 5)));
   const completed = { ...next, leasedUntil: 0, nextAt, failures, outcome, httpStatus, failureStage,
