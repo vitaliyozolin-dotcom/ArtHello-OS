@@ -11,6 +11,9 @@ const safeFailure = error => /^HTTP_\d{3}$|^[A-Z_0-9]{3,60}$/.test(error?.messag
 export function classifyAlfaApiFailure(status, payload) {
   const message = typeof payload?.error === 'string' ? payload.error : '';
   const reasons = new Map([
+    ['AlfaCRM не подтвердила связи занятия. Изменения не применены.','ALFA_LESSON_LINKS_UNCONFIRMED'],
+    ['AlfaCRM не подтвердила время занятия. Изменения не применены.','ALFA_LESSON_TIME_UNCONFIRMED'],
+    ['AlfaCRM не подтвердила дату занятия. Изменения не применены.','ALFA_LESSON_DATE_UNCONFIRMED'],
     ['AlfaCRM не вернула корректный список записей. Изменения не применены.','ALFA_INVALID_LIST'],
     ['AlfaCRM вернула некорректное количество записей.','ALFA_INVALID_TOTAL'],
     ['Серверный канал AlfaCRM не настроен. Подключение не изменено.','ALFA_TRANSPORT_NOT_CONFIGURED'],

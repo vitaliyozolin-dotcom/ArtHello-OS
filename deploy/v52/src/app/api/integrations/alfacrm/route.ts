@@ -2106,7 +2106,12 @@ function isoDate(value: unknown) {
 
 function lessonFactTimestamp(date: string, value: unknown): string | null {
   if (value === undefined || value === null || value === '') return null;
-  const match = /^(\d{1,2}):(\d{2})(?::(\d{2}))?$/.exec(scalar(value));
+  const text = scalar(value);
+  // Alfa read responses include the lesson date; clocks without a zone are
+  // local Moscow time, just like the existing time-only contract.
+  const dated = /^(\d{4}-\d{2}-\d{2})[ T](\d{1,2}:\d{2}(?::\d{2})?)$/.exec(text);
+  if (dated && dated[1] !== date) throw new AlfaApiError('AlfaCRM не подтвердила дату занятия. Изменения не применены.');
+  const match = /^(\d{1,2}):(\d{2})(?::(\d{2}))?$/.exec(dated ? dated[2] : text);
   if (!match || Number(match[1]) > 23 || Number(match[2]) > 59 || Number(match[3] ?? 0) > 59) throw new AlfaApiError('AlfaCRM не подтвердила время занятия. Изменения не применены.');
   const parsed = new Date(`${date}T${match[1].padStart(2,'0')}:${match[2]}:${match[3] ?? '00'}+03:00`);
   if (Number.isNaN(parsed.getTime()) || new Date(`${date}T00:00:00Z`).toISOString().slice(0,10) !== date) throw new AlfaApiError('AlfaCRM не подтвердила дату занятия. Изменения не применены.');
@@ -2114,11 +2119,7 @@ function lessonFactTimestamp(date: string, value: unknown): string | null {
 }
 
 function lessonTimestamp(date: string, timeValue: unknown) {
-  const time = scalar(timeValue);
-  const matched = /^(\d{1,2}):(\d{2})/.exec(time);
-  const clock = matched ? `${matched[1].padStart(2, "0")}:${matched[2]}:00` : "00:00:00";
-  const parsed = new Date(`${date}T${clock}+03:00`);
-  return Number.isNaN(parsed.getTime()) ? `${date}T00:00:00Z` : parsed.toISOString();
+  return lessonFactTimestamp(date, timeValue) ?? lessonFactTimestamp(date, '00:00:00')!;
 }
 
 function maskEmail(email: string) {

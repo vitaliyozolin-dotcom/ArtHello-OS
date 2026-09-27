@@ -8,6 +8,9 @@ test('failure diagnostics disclose only fixed reasons, never API text',()=>{
   assert.equal(classifyAlfaApiFailure(502,{error:'AlfaCRM не выполнила чтение данных (private).'}),'HTTP_502');
   assert.equal(classifyAlfaApiFailure(502,null),'HTTP_502');
   for(const [message,code] of [
+    ['AlfaCRM не подтвердила связи занятия. Изменения не применены.','ALFA_LESSON_LINKS_UNCONFIRMED'],
+    ['AlfaCRM не подтвердила время занятия. Изменения не применены.','ALFA_LESSON_TIME_UNCONFIRMED'],
+    ['AlfaCRM не подтвердила дату занятия. Изменения не применены.','ALFA_LESSON_DATE_UNCONFIRMED'],
     ['AlfaCRM не вернула корректный список записей. Изменения не применены.','ALFA_INVALID_LIST'],
     ['AlfaCRM вернула некорректное количество записей.','ALFA_INVALID_TOTAL'],
     ['Серверный канал AlfaCRM не настроен. Подключение не изменено.','ALFA_TRANSPORT_NOT_CONFIGURED'],
