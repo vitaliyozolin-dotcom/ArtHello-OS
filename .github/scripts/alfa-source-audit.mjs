@@ -97,6 +97,28 @@ export function summarizeLessonFields(rows) {
     }
     fields[key] = counts;
   }
+  const effective = {};
+  const object = value => value && typeof value === 'object' && !Array.isArray(value) ? value : null;
+  const scalar = value => typeof value === 'string' || typeof value === 'number' ? String(value).trim() : '';
+  for (const key of ['group_ids','customer_ids','teacher_ids']) {
+    const counts = {unknown:0,empty:0,present:0,invalidRows:0,invalidIds:0,duplicates:0,pluralRows:0,singularRows:0};
+    for (const row of rows) {
+      const plural = row[key];
+      const name = key.slice(0,-4);
+      const singular = row[name+'_id'] ?? (name==='customer' ? undefined : object(row[name])?.id);
+      if (plural===undefined && (singular===undefined || singular===null)) { counts.unknown++; continue; }
+      counts[plural===undefined ? 'singularRows' : 'pluralRows']++;
+      if (plural!==undefined && !Array.isArray(plural)) { counts.invalidRows++; continue; }
+      const values = Array.isArray(plural) ? plural : [singular];
+      counts[values.length ? 'present' : 'empty']++;
+      const ids = values.map(value=>scalar(object(value)?.id ?? value));
+      const invalid = ids.filter(id=>!/^[1-9]\d*$/.test(id)).length;
+      const duplicates = ids.length-new Set(ids).size;
+      counts.invalidIds+=invalid; counts.duplicates+=duplicates;
+      if(invalid || duplicates)counts.invalidRows++;
+    }
+    effective[key]=counts;
+  }
   const times = {};
   for (const [key,fallback] of [['time_from','start_time'],['time_to','end_time']]) {
     const counts = {missing:0,null:0,blank:0,clock:0,clockOutOfRange:0,fractionalClock:0,dateTime:0,number:0,other:0};
@@ -115,10 +137,13 @@ export function summarizeLessonFields(rows) {
     }
     times[key] = counts;
   }
-  return {rows:rows.length,fields,times};
+  return {rows:rows.length,fields,effective,times};
 }
 
 export function storedLessonDiagnostics(db, state) {
+  const tables = new Set(db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all().map(row=>row.name));
+  const required = ['alfacrm_raw_observations','alfacrm_import_batches','alfacrm_lesson_facts'];
+  if(required.some(name=>!tables.has(name))) return {status:'unavailable',reason:'LESSON_DIAGNOSTIC_SCHEMA_UNAVAILABLE'};
   const rows = db.prepare("SELECT remote_branch_id,payload,observed_at FROM alfacrm_raw_observations WHERE module='lessons' AND batch_id=(SELECT id FROM alfacrm_import_batches WHERE module='lessons' ORDER BY created_at DESC,id DESC LIMIT 1)").all();
   const byBranch = {};
   for (const branch of Object.keys(state.branchMappings ?? {}).filter(id=>/^[1-9]\d*$/.test(id))) {

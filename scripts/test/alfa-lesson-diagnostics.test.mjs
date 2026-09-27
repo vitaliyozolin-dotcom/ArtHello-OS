@@ -36,3 +36,20 @@ test('time diagnostics identify clocks, dated values and invalid ranges without 
  assert.equal(r.times.time_from.fractionalClock,1);assert.equal(r.times.time_from.other,1);
  assert.equal(r.times.time_to.clockOutOfRange,1);assert.ok(!JSON.stringify(r).includes('PRIVATE_TIME'));
 });
+
+test('effective links follow singular and nested importer fallbacks',()=>{
+ const r=audit.summarizeLessonFields([{group_id:0,teacher:{id:7},customer_id:'PRIVATE_ID'},
+  {group:{id:3},teacher_id:0,customer_ids:[]}, {group_ids:null,group_id:4}]);
+ assert.equal(r.effective.group_ids.invalidRows,2);
+ assert.equal(r.effective.group_ids.singularRows,2);
+ assert.equal(r.effective.teacher_ids.invalidIds,1);
+ assert.equal(r.effective.customer_ids.invalidIds,1);
+ assert.ok(!JSON.stringify(r).includes('PRIVATE_ID'));
+});
+test('approved legacy databases produce unavailable evidence instead of audit failure or zero counts',async()=>{
+ const {DatabaseSync}=await import('node:sqlite');const db=new DatabaseSync(':memory:');
+ db.exec('PRAGMA query_only=ON');
+ const r=audit.storedLessonDiagnostics(db,{});
+ assert.equal(r.status,'unavailable');assert.equal(r.reason,'LESSON_DIAGNOSTIC_SCHEMA_UNAVAILABLE');
+ assert.equal(r.facts,undefined);db.close();
+});
