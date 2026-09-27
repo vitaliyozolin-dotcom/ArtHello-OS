@@ -1363,3 +1363,29 @@ test('stored staff audit excludes departed current pointers while retaining immu
  assert.equal(audit.modules.staff.uniqueCustomers,1);
  assert.ok(sql.prepare("SELECT count(*) n FROM alfacrm_raw_observations WHERE module='staff' AND record_id='12'").get().n>0);
 });
+
+
+test('dated Alfa lesson times preserve Moscow clock in facts and group projections',async t=>{
+ const {sql,state}=await setup(t);const {createHash}=await import('node:crypto');
+ sql.exec("INSERT INTO alfacrm_import_batches(id,module,scope,status,created_at) VALUES('DATED','lessons','{}','projecting','2026-09-01')");
+ const groupId=`GRP-A-${createHash('sha256').update('1:5').digest('hex').slice(0,16).toUpperCase()}`;
+ sql.prepare("INSERT INTO education_groups(id,program_id) VALUES(?,'P1')").run(groupId);
+ for (const [index,clock] of ['2026-09-01 09:30:15','2026-09-01T09:30:15','09:30:15'].entries()) {
+  const rows=[{remoteBranchId:'1',item:{id:200+index,date:'2026-09-01',group_ids:[5],customer_ids:[10],teacher_ids:[20],time_from:clock,time_to:'2026-09-01 10:15:00'}}];
+  await route.upsertRawRecords('lessons',rows,'DATED');
+  await route.canonicalizeLessons(rows,state,'TEST');
+ }
+ const facts=sql.prepare('SELECT scheduled_at,ends_at FROM alfacrm_lesson_facts').all();
+ assert.equal(facts.length,3);
+ assert.ok(facts.every(f=>f.scheduled_at==='2026-09-01T06:30:15.000Z' && f.ends_at==='2026-09-01T07:15:00.000Z'));
+ const views=sql.prepare('SELECT scheduled_at FROM education_lessons').all();
+ assert.equal(views.length,3);assert.ok(views.every(v=>v.scheduled_at==='2026-09-01T06:30:15.000Z'));
+});
+
+test('dated lesson times reject conflicting dates, invalid clocks and unconfirmed zones before any writes',async t=>{
+ const {sql,state}=await setup(t);
+ for (const time_from of ['2026-09-02 09:30:00','2026-02-30 09:30:00','2026-09-01 24:00:00','2026-09-01 09:60:00','2026-09-01 09:30:60','2026-09-01 09:30:00 trailing','2026-09-01T09:30:00Z']) {
+  await assert.rejects(route.canonicalizeLessons([{remoteBranchId:'1',item:{id:250,date:'2026-09-01',customer_ids:[10],time_from}}],state,'TEST'),/время занятия|дату занятия/);
+ }
+ assert.equal(sql.prepare('SELECT count(*) n FROM alfacrm_lesson_facts').get().n,0);
+});
