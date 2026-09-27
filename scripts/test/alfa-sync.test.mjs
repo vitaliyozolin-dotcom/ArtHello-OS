@@ -19,13 +19,15 @@ function fixture(change=()=>{}) {
       if(body.action==='importModule') result={complete:true,accepted:body.module==='families'?839:10,rejected:0,deferredCount:body.module==='families'?1:0,state:{modules:{[body.module]:{status:'imported'}}}};
       if(body.action==='setAutosync') result={state:{autosync:{enabled:body.enabled,modules:body.modules??[]}}};
       if(body.action==='readDiaryDirectoryOptions') result={diaryOptions:options(body.branchId)};
-      if(['previewDiaryDirectory','applyDiaryDirectory'].includes(body.action)) result={diaryDirectory:{token:'diary-token',applied:body.action==='applyDiaryDirectory',students:30,families:30,classes:body.branchId==='BR-SCHOOL'?6:4,teachers:4,scheduleLessons:body.branchId==='BR-SCHOOL'?184:0,unassignedLessons:body.branchId==='BR-SCHOOL'?20:0,archived:0}};
+      if(['previewDiaryDirectory','applyDiaryDirectory'].includes(body.action)) result={diaryDirectory:{token:'diary-token',applied:body.action==='applyDiaryDirectory',students:30,families:30,classes:body.branchId==='BR-SCHOOL'?6:4,teachers:4,scheduleLessons:0,unassignedLessons:0,archived:0}};
       change(body,result);return result;
     }};
 }
 test('sync uses staged owner APIs, defers one customer and verifies both repeated diary receipts',async()=>{
   const client=fixture();const result=await synchronize(client);
-  assert.equal(result.status,'synchronized-except-deferred-record');
+  assert.equal(result.status,'manual-import-complete-with-exceptions');
+  assert.equal(result.schoolSchedule.applied,false);
+  assert.ok(client.calls.filter(c=>c.action==='previewDiaryDirectory').every(c=>c.includeSchoolSchedule===false));
   assert.equal(result.modules.families.deferred,1);
   assert.deepEqual(client.calls.filter(c=>c.action==='importModule').map(c=>c.module),['families','staff','groups','subscriptions','lessons']);
   assert.equal(client.calls.filter(c=>c.action==='applyDiaryDirectory').length,4);
