@@ -12,7 +12,8 @@ ROOT=Path(__file__).resolve().parents[1]
 # Previously accepted School key; D065/R17 protected School transport.
 SCHOOL_HOST_PIN='SHA256:/kBNohTF+5g8U+jQt+PzOCoWZ9yCSFjBnEP3Oc3MwRI'
 # Exact central source from successful protected release 36269374177.
-AUDIT_CENTRAL_LIVE=('cc8cff9c2a396a97aeb6daf8dc0907a72f5587fa',
+AUDIT_CENTRAL_LIVE=('0210d4c7dabe5376d892c7058ffab74b36185a64',
+                    'cc8cff9c2a396a97aeb6daf8dc0907a72f5587fa',
                     '49cea8d5f69d356e16c6aa88ecc8a7e93cef417d',
                     'd83da0ce8311a4b60832031a217b91c7dd6bb1c8',
                     'd066c3e7d94124efd847310e0d5ae9822401fa2f')
@@ -108,6 +109,7 @@ def main():
     report['source']=capture(['docker','exec','-i',name,'node','--input-type=module','-'],'ALFA_SOURCE_AUDIT=',data=(ROOT/'.github/scripts/alfa-source-audit.mjs').read_bytes())
     print('ALFA_SOURCE_RECONCILIATION='+json.dumps({'controllerSha':source,'centralSource':central_source,
         'observedAt':report['source'].get('observedAt'),
+        'storedLessonDiagnostics':report['source'].get('storedLessonDiagnostics'),
         'sourceBranches':[{'id':branch['id'],'reconciliation':branch.get('reconciliation')}
             for branch in report['source'].get('sourceBranches',[]) if branch.get('reconciliation')],
         'status':report['source'].get('status','observed'),

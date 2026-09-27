@@ -79,6 +79,42 @@ export function summarizePayPage(payload, from, to) {
   return result;
 }
 
+export function summarizeLessonFields(rows) {
+  const fields = {};
+  for (const key of ['group_ids','customer_ids','teacher_ids']) {
+    const counts = {missing:0,null:0,nonArray:0,empty:0,present:0,invalidIds:0,duplicates:0};
+    for (const row of rows) {
+      const value = row[key];
+      if (value === undefined) { counts.missing++; continue; }
+      if (value === null) { counts.null++; continue; }
+      if (!Array.isArray(value)) { counts.nonArray++; continue; }
+      counts[value.length ? 'present' : 'empty']++;
+      const ids = value.map(item => item && typeof item === 'object' ? item.id : item)
+        .map(item => typeof item === 'string' || typeof item === 'number' ? String(item).trim() : '');
+      counts.invalidIds += ids.filter(id => !/^[1-9]\d*$/.test(id)).length;
+      const valid = ids.filter(id => /^[1-9]\d*$/.test(id));
+      counts.duplicates += valid.length - new Set(valid).size;
+    }
+    fields[key] = counts;
+  }
+  return {rows:rows.length,fields};
+}
+
+export function storedLessonDiagnostics(db, state) {
+  const rows = db.prepare("SELECT remote_branch_id,payload,observed_at FROM alfacrm_raw_observations WHERE module='lessons' AND batch_id=(SELECT id FROM alfacrm_import_batches WHERE module='lessons' ORDER BY created_at DESC,id DESC LIMIT 1)").all();
+  const byBranch = {};
+  for (const branch of Object.keys(state.branchMappings ?? {}).filter(id=>/^[1-9]\d*$/.test(id))) {
+    const selected = rows.filter(row=>row.remote_branch_id===branch);
+    let invalidPayloads = 0;
+    const records = selected.flatMap(row=>{try {const value=JSON.parse(row.payload);if(!value || typeof value!=='object' || Array.isArray(value))throw Error();return [value];}catch{invalidPayloads++;return [];}});
+    byBranch[branch] = {...summarizeLessonFields(records),invalidPayloads,
+      lastObservedAt:selected.map(row=>row.observed_at).sort().at(-1)??null};
+  }
+  return {source:'latest-stored-lesson-batch',byBranch,
+    batches:db.prepare("SELECT status,COUNT(*) AS count,MAX(created_at) AS lastCreatedAt FROM alfacrm_import_batches WHERE module='lessons' GROUP BY status").all(),
+    facts:db.prepare("SELECT remote_branch_id AS branch,COUNT(*) AS count,MAX(observed_at) AS lastObservedAt,SUM(teacher_ids IS NULL) AS unknownTeacherLists,SUM(customer_ids IS NULL) AS unknownCustomerLists FROM alfacrm_lesson_facts GROUP BY remote_branch_id").all()};
+}
+
 async function main() {
   const candidates = [];
   for (const path of databases('/data/d1')) {
@@ -145,7 +181,7 @@ async function main() {
     throw Error('PAGE_LIMIT');
   }
   const branches = await paged('branch/index',{is_active:1});
-  const report={observedAt:new Date().toISOString(),sourceBranches:[],osFamilies:[],uniqueIncludedCustomerIds:0};
+  const report={observedAt:new Date().toISOString(),storedLessonDiagnostics:storedLessonDiagnostics(db,state),sourceBranches:[],osFamilies:[],uniqueIncludedCustomerIds:0};
   const unique = new Set(), mappedIncluded = new Set(), mappedActive = new Set(), mappedMemberships = new Map();
   for(const branch of branches){
     const id=String(branch.id);
