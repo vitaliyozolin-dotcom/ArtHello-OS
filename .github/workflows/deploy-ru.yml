@@ -406,9 +406,14 @@ jobs:
           path: alfa-sync-${{ github.run_id }}-${{ github.run_attempt }}
           persist-credentials: false
           fetch-depth: 1
-      - name: Synchronize verified clients except the deferred source record
+      - name: Synchronize five Alfa modules and both diary directories
         working-directory: alfa-sync-${{ github.run_id }}-${{ github.run_attempt }}
         env:
           ARTHELLO_OWNER_LOGIN: ${{ secrets.ARTHELLO_FINANCE_IMPORT_LOGIN }}
           ARTHELLO_OWNER_PASSWORD: ${{ secrets.ARTHELLO_FINANCE_IMPORT_PASSWORD }}
+          SSH_PRIVATE_KEY: ${{ secrets.ARTHELLO_RU_SSH_PRIVATE_KEY }}
+          SSH_KNOWN_HOSTS: ${{ secrets.ARTHELLO_RU_SSH_KNOWN_HOSTS }}
+          DEPLOY_HOST: ${{ secrets.ARTHELLO_RU_DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.ARTHELLO_RU_DEPLOY_USER }}
+          DEPLOY_PORT: ${{ secrets.ARTHELLO_RU_DEPLOY_PORT }}
         run: python3 -I -B deploy/alfa_sync.py

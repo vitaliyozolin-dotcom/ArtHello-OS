@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { stripTypeScriptTypes } from 'node:module';
 const source = stripTypeScriptTypes(readFileSync(new URL('../lib/alfacrm-import.ts', import.meta.url), 'utf8'));
-const { newAlfaAutosync, advanceAlfaAutosync, authenticateAlfaAutosync } = await import(`data:text/javascript;base64,${Buffer.from(source).toString('base64')}`);
+const { newAlfaAutosync, resumeAlfaAutosync, advanceAlfaAutosync, authenticateAlfaAutosync } = await import(`data:text/javascript;base64,${Buffer.from(source).toString('base64')}`);
 test('successful cycle waits one hour, chunk continues without resetting its cursor', () => {
   let s = newAlfaAutosync(['families', 'subscriptions'], 'scope', 1000);
   s = advanceAlfaAutosync(s, { status: 200, previewToken: 'preview' }, 1000);
@@ -75,4 +75,14 @@ test('timer serializes requests, suppresses response data and does not restart a
 test('production image carries the Alfa timer imported by the runtime',()=>{
  let docker; try { docker=readFileSync(new URL('../../Dockerfile',import.meta.url),'utf8'); } catch(error) { if(error.code!=='ENOENT')throw error; docker=readFileSync(new URL('../contract-fixtures/v52.Dockerfile',import.meta.url),'utf8'); }
  assert.match(docker,/COPY --from=application \/app\/production\/alfacrm-autosync-timer\.mjs \/app\/production\/alfacrm-autosync-timer\.mjs/);
+});
+
+
+test('manual resume preserves cycle evidence, backoff and module position while renewing invalidated preview', () => {
+  const prior = {...newAlfaAutosync(['families','subscriptions'],'scope',1000),enabled:false,index:1,phase:'import',cursor:15,lastSuccessAt:500,failures:2,nextAt:9000,outcome:'paused'};
+  const resumed = resumeAlfaAutosync(prior,['families','subscriptions'],'scope');
+  assert.deepEqual(resumed,{...prior,enabled:true,phase:'preview',cursor:0,outcome:'ready'});
+  assert.equal(prior.cursor,15);
+  for(const candidate of [undefined,{...prior,enabled:true},{...prior,scope:'changed'}]) assert.throws(()=>resumeAlfaAutosync(candidate,['families','subscriptions'],'scope'));
+  assert.throws(()=>resumeAlfaAutosync(prior,['families'],'scope'));
 });

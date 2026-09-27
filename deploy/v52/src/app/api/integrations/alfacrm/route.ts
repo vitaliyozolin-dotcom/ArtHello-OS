@@ -17,7 +17,7 @@ import {
   verifyAuthenticatedRequestCsrf,
 } from "../../../../lib/production-auth";
 import { hasTrustedMutationOrigin } from "../../../../lib/request-security";
-import { scopedAlfaRows, auditAlfaBranchRows, alfaBranchDisposition, ALFA_SCOPE_CONTRACT, newAlfaAutosync, advanceAlfaAutosync, authenticateAlfaAutosync, type AlfaAutosync } from "../../../../lib/alfacrm-import";
+import { scopedAlfaRows, auditAlfaBranchRows, alfaBranchDisposition, ALFA_SCOPE_CONTRACT, newAlfaAutosync, resumeAlfaAutosync, advanceAlfaAutosync, authenticateAlfaAutosync, type AlfaAutosync } from "../../../../lib/alfacrm-import";
 
 const CONNECTION_ID = "INT-T-ALFACRM";
 const STATE_KEY = "alfacrm_connector:v1";
@@ -326,6 +326,10 @@ async function configureAlfaAutosync(context: RequestContext, body: Record<strin
     }
     if (schedule.modules.includes('families') && state.modules.families.customerPolicyContract !== CUSTOMER_POLICY_CONTRACT) {
       return privateJson({ error: 'Сначала выполните полную сверку клиентов по новым правилам статусов' }, 409);
+    }
+    if (body.resume === true) {
+      try { schedule = resumeAlfaAutosync(state.autosync, modules, schedule.scope); }
+      catch { return privateJson({ error: 'AUTOSYNC_RESUME_STATE_CHANGED' }, 409); }
     }
     state.autosync = schedule;
   }
