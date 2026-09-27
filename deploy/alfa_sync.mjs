@@ -107,7 +107,7 @@ export async function synchronize(client, progress = () => {}) {
     try {
       if(restoreModules) {
         try {
-          const restored=await call({action:'setAutosync',enabled:true,modules:restoreModules});
+          const restored=await call({action:'setAutosync',enabled:true,modules:restoreModules,resume:true});
           requireValue(restored.state?.autosync?.enabled===true && JSON.stringify(restored.state.autosync.modules)===JSON.stringify(restoreModules),'AUTOSYNC_RESTORE_UNCONFIRMED');
           report.autosyncEnabled=true;
           progress({stage:'autosync-restored',modules:restoreModules});

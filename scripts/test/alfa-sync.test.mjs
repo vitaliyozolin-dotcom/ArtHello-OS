@@ -88,7 +88,7 @@ test('enabled autosync is paused only after source verification and restored wit
   const client=fixture((body,result)=>{if(!body.action)result.state.autosync={enabled:true,modules:['families','staff','groups','subscriptions']};});
   const report=await synchronize(client);
   const changes=client.calls.filter(c=>c.action==='setAutosync');
-  assert.deepEqual(changes,[{action:'setAutosync',enabled:false},{action:'setAutosync',enabled:true,modules:['families','staff','groups','subscriptions']}]);
+  assert.deepEqual(changes,[{action:'setAutosync',enabled:false},{action:'setAutosync',enabled:true,modules:['families','staff','groups','subscriptions'],resume:true}]);
   assert.equal(report.autosyncEnabled,true);
   assert.ok(client.calls.findIndex(c=>c.action==='previewLegacyMigration')<client.calls.findIndex(c=>c.action==='setAutosync'));
 });
@@ -118,6 +118,12 @@ test('failed diary transfer restores previously enabled autosync and preserves p
     if(body.action==='previewDiaryDirectory')throw Error('DIARY_UNAVAILABLE');
   });
   await assert.rejects(()=>synchronize(client),/DIARY_UNAVAILABLE/);
-  assert.deepEqual(client.calls.at(-2),{action:'setAutosync',enabled:true,modules:['families','staff','groups','subscriptions']});
+  assert.deepEqual(client.calls.at(-2),{action:'setAutosync',enabled:true,modules:['families','staff','groups','subscriptions'],resume:true});
   assert.equal(client.calls.at(-1).action,'logout');
+});
+
+test('restore requests saved autosync state, not a fresh schedule', async()=>{
+ const client=fixture((body,result)=>{if(result?.state?.connected)result.state.autosync={enabled:true,modules:['families','staff','groups','subscriptions']};});
+ await synchronize(client);
+ assert.equal(client.calls.find(c=>c.action==='setAutosync'&&c.enabled===true).resume,true);
 });

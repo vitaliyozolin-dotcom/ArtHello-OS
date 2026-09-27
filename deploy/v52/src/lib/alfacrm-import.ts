@@ -71,6 +71,18 @@ export function newAlfaAutosync(modules: string[], scope: string, now: number): 
     index: 0, phase: 'preview', cursor: 0, nextAt: now, lastSuccessAt: 0, failures: 0, outcome: 'ready' };
 }
 
+// Manual imports invalidate module preview tokens. Keep cycle evidence and timing,
+// but renew the current module preview before any further automatic import.
+export function resumeAlfaAutosync(saved: AlfaAutosync | undefined, modules: string[], scope: string): AlfaAutosync {
+  const validated = newAlfaAutosync(modules, scope, 0);
+  if (!saved || saved.enabled || saved.scope !== scope
+    || JSON.stringify(saved.modules) !== JSON.stringify(validated.modules)
+    || !Number.isSafeInteger(saved.index) || saved.index < 0 || saved.index >= saved.modules.length) {
+    throw new Error('AUTOSYNC_RESUME_STATE_CHANGED');
+  }
+  return { ...saved, enabled: true, phase: 'preview', cursor: 0, outcome: 'ready' };
+}
+
 export function advanceAlfaAutosync(state: AlfaAutosync,
   result: { status: number; previewToken?: unknown; complete?: unknown; nextCursor?: unknown; rejected?: unknown; projectionBlocked?: unknown },
   now: number): AlfaAutosync {
