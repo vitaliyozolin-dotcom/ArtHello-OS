@@ -7,9 +7,9 @@ on:
         description: Inspect, remove completed checkouts, or retire two exact unused images
         type: choice
         required: true
-        options: [inspect, inspect-images, inspect-autosync, inspect-snapshot, clean, images, images-extra, retire-e2e, retire-e2e-next]
+        options: [inspect, inspect-images, inspect-autosync, inspect-snapshot, clean, images, images-extra, retire-e2e, retire-e2e-next, retire-e2e-d252]
       confirmation:
-        description: For clean type CLEAN ARTHELLO OLD CHECKOUTS; images RETIRE TWO UNUSED IMAGES; images-extra RETIRE TWO EXTRA UNUSED IMAGES; retire-e2e RETIRE EXACT UNUSED E2E IMAGE; retire-e2e-next RETIRE TWO VERIFIED UNUSED E2E IMAGES
+        description: For clean type CLEAN ARTHELLO OLD CHECKOUTS; images RETIRE TWO UNUSED IMAGES; images-extra RETIRE TWO EXTRA UNUSED IMAGES; retire-e2e RETIRE EXACT UNUSED E2E IMAGE; retire-e2e-next RETIRE TWO VERIFIED UNUSED E2E IMAGES; retire-e2e-d252 RETIRE D252 UNUSED TEST IMAGES
         type: string
         required: false
 
@@ -34,6 +34,7 @@ jobs:
        (inputs.operation == 'images' && inputs.confirmation == 'RETIRE TWO UNUSED IMAGES') ||
        (inputs.operation == 'images-extra' && inputs.confirmation == 'RETIRE TWO EXTRA UNUSED IMAGES') ||
        (inputs.operation == 'retire-e2e' && inputs.confirmation == 'RETIRE EXACT UNUSED E2E IMAGE') ||
+       (inputs.operation == 'retire-e2e-d252' && inputs.confirmation == 'RETIRE D252 UNUSED TEST IMAGES') ||
        (inputs.operation == 'retire-e2e-next' && inputs.confirmation == 'RETIRE TWO VERIFIED UNUSED E2E IMAGES'))
     runs-on: [self-hosted, linux, x64, arthello-gateway]
     environment: production-ru
@@ -50,6 +51,48 @@ jobs:
             -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/vnd.github+json' \
             https://api.github.com/repos/vitaliyozolin-dotcom/ArtHello-OS/git/ref/heads/main | jq -er '.object.sha')"
           test "$current_main" = "$GITHUB_SHA"
+          if [ "$OPERATION" = retire-e2e-d252 ]; then
+            # D252: exact reproducible test images, zero container references in run 36353486884.
+            ids=(
+              sha256:8907172c6ba670feb7c9c0d164ac1db4f2e7af33e4ceba778f1cfed7a6c9f37a
+              sha256:e7008b1cb9a6f966ec7bc5b022002011052ecfc9427747823b966a2c27a040d4
+            )
+            tags=(
+              arthello-e2e:c2b29672bb4d42a535ff44ea2b407622282aa0ac
+              arthello-e2e:a6284411bc99db2787884421fe9b0457fb56ba77
+            )
+            check_e2e() {
+              local i id tag
+              for i in 0 1; do
+                id="${ids[$i]}"; tag="${tags[$i]}"
+                docker image inspect "$id" | jq -e --arg id "$id" --arg tag "$tag" --arg rev "${tag#*:}" \
+                  'length == 1 and .[0].Id == $id and .[0].RepoTags == [$tag] and
+                   .[0].Config.Labels["org.opencontainers.image.revision"] == $rev' >/dev/null
+                test "$(docker image inspect "$tag" --format '{{.Id}}')" = "$id"
+              done
+              mapfile -t containers < <(docker ps -aq --no-trunc)
+              if [ "${#containers[@]}" -gt 0 ]; then
+                docker inspect "${containers[@]}" | jq -e --arg a "${ids[0]}" --arg b "${ids[1]}" \
+                  'all(.[]; .Image != $a and .Image != $b)' >/dev/null
+              fi
+            }
+            echo '### Space before (KiB)'
+            df -Pk -- "$GITHUB_WORKSPACE"
+            check_e2e
+            current_main="$(curl --fail --silent --show-error --max-time 20 \
+              -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/vnd.github+json' \
+              https://api.github.com/repos/vitaliyozolin-dotcom/ArtHello-OS/git/ref/heads/main | jq -er '.object.sha')"
+            test "$current_main" = "$GITHUB_SHA"
+            check_e2e
+            for id in "${ids[@]}"; do docker image rm --no-prune "$id"; done
+            for id in "${ids[@]}"; do
+              if docker image inspect "$id" >/dev/null 2>&1; then exit 2; fi
+            done
+            echo '### Space after (KiB)'
+            df -Pk -- "$GITHUB_WORKSPACE"
+            echo 'D252_UNUSED_TEST_IMAGES_RETIRED=1'
+            exit 0
+          fi
           if [ "$OPERATION" = retire-e2e-next ]; then
             # D233: exact reproducible test images, zero container references in run 36124326756.
             ids=(
