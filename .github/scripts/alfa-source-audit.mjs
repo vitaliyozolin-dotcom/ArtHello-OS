@@ -97,7 +97,25 @@ export function summarizeLessonFields(rows) {
     }
     fields[key] = counts;
   }
-  return {rows:rows.length,fields};
+  const times = {};
+  for (const [key,fallback] of [['time_from','start_time'],['time_to','end_time']]) {
+    const counts = {missing:0,null:0,blank:0,clock:0,clockOutOfRange:0,fractionalClock:0,dateTime:0,number:0,other:0};
+    for (const row of rows) {
+      const value = row[key] ?? row[fallback];
+      if (value === undefined) { counts.missing++; continue; }
+      if (value === null) { counts.null++; continue; }
+      if (typeof value === 'number') { counts.number++; continue; }
+      if (typeof value !== 'string') { counts.other++; continue; }
+      const text = value.trim(); if (!text) { counts.blank++; continue; }
+      const clock = /^(\d{1,2}):(\d{2})(?::(\d{2}))?$/.exec(text);
+      if (clock) { counts[Number(clock[1])<=23 && Number(clock[2])<=59 && Number(clock[3]??0)<=59 ? 'clock' : 'clockOutOfRange']++; continue; }
+      if (/^\d{1,2}:\d{2}:\d{2}[.,]\d+$/.test(text)) counts.fractionalClock++;
+      else if (/^\d{4}[-.]\d{2}[-.]\d{2}[ T]\d{1,2}:\d{2}/.test(text)) counts.dateTime++;
+      else counts.other++;
+    }
+    times[key] = counts;
+  }
+  return {rows:rows.length,fields,times};
 }
 
 export function storedLessonDiagnostics(db, state) {

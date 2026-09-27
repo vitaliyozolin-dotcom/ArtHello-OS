@@ -28,3 +28,11 @@ test('stored diagnostics read failed batch evidence without writing or leaking p
  assert.ok(!/PRIVATE|observation|source"/.test(JSON.stringify(report.byBranch)));
  db.close();
 });
+
+
+test('time diagnostics identify clocks, dated values and invalid ranges without printing values',()=>{
+ const r=audit.summarizeLessonFields([{time_from:'09:30:00',time_to:'24:00:00'}, {time_from:'2026-09-27 09:00:00'}, {start_time:'09:30:00.000'}, {time_from:'PRIVATE_TIME'}]);
+ assert.equal(r.times.time_from.clock,1);assert.equal(r.times.time_from.dateTime,1);
+ assert.equal(r.times.time_from.fractionalClock,1);assert.equal(r.times.time_from.other,1);
+ assert.equal(r.times.time_to.clockOutOfRange,1);assert.ok(!JSON.stringify(r).includes('PRIVATE_TIME'));
+});
