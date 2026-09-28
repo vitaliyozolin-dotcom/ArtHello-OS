@@ -1028,7 +1028,12 @@ test('real family read follows old ID and returns both children, contracts and o
   return wrap();
  };
  harness.orm=drizzle(harness.env.DB);
+ const educationHandler = stripTypeScriptTypes(readFileSync(resolve('lib/education-conditions-handler.ts'),'utf8'),{mode:'transform'}).replace(/from\s+["']([^"']+)["']/g,(_all,name)=>{
+  const target=adapters[name]??adapters[name==='../db'?'../../../../db':`../../../../lib/${name.slice(2)}`];
+  assert.ok(target,name);return `from "${target}"`;
+ });
  const familyAdapters={...mergeAdapters,
+  '../../../lib/education-conditions-handler':dataModule(educationHandler),
   '../../../lib/family-card-state':dataModule(stripTypeScriptTypes(readFileSync(resolve('lib/family-card-state.ts'),'utf8'),{mode:'strip'})),
   '../../../db':dataModule('export const ensureCoreTables=async()=>{};export const getDb=()=>globalThis.__alfaCorrectness.orm;'),
   '../../../db/schema':new URL('../db/schema.ts',import.meta.url).href,
