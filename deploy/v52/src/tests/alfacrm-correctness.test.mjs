@@ -17,6 +17,7 @@ const policy = await import(policyUrl);
 globalThis.__alfaCorrectness = { env: {}, actor: null, csrfValid: true, originValid: true };
 const harness = globalThis.__alfaCorrectness;
 const adapters = {
+  '../../../../lib/education-conditions': dataModule(stripTypeScriptTypes(readFileSync(resolve('lib/education-conditions.ts'), 'utf8'), { mode: 'strip' })),
   'cloudflare:workers': dataModule('export const env=globalThis.__alfaCorrectness.env;'),
   '../../../../db': dataModule('export const ensureCoreTables=async()=>{}; export const readIntegrationCredential=async()=>JSON.stringify({email:"fixture@example.test",apiKey:"synthetic-key",appKey:""}); export const saveIntegrationCredential=async()=>{};'),
   '../../../../lib/access-policy': policyUrl,
