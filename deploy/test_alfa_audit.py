@@ -104,6 +104,12 @@ class RuntimeFailureTests(unittest.TestCase):
         self.assertEqual(result['reason'],'RUNTIME_LOG_READ_UNCONFIRMED')
         self.assertNotIn('PRIVATE',json.dumps(result))
 
+    def test_stream_join_preserves_real_blank_rows(self):
+        container={'State':{'Running':True},'RestartCount':0}
+        for stdout,stderr,expected in [(b'one\n\n',b'two\n',3),(b'one\n',b'',1),(b'',b'two\n',1),(b'one',b'two',2)]:
+            with patch.object(audit.subprocess,'run',return_value=subprocess.CompletedProcess([],0,stdout,stderr)):
+                self.assertEqual(audit.runtime_failure_diagnostics(container,'a'*64)['linesRead'],expected)
+
     def test_runtime_read_has_fixed_bounded_scope(self):
         container={'State':{'Running':True,'OOMKilled':False},'RestartCount':0}
         with patch.object(audit.subprocess,'run',return_value=subprocess.CompletedProcess([],0,b'',b'')) as run:

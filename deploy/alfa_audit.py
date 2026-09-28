@@ -76,7 +76,8 @@ def runtime_failure_diagnostics(container, container_id):
         return {'status':'blocked','reason':'RUNTIME_LOG_READ_UNCONFIRMED'}
     if result.returncode!=0:
         return {'status':'blocked','reason':'RUNTIME_LOG_READ_UNCONFIRMED'}
-    return summarize_runtime_failure(container,b'\n'.join(part.rstrip(b'\n') for part in (result.stdout,result.stderr) if part))
+    separator=b'\n' if result.stdout and result.stderr and not result.stdout.endswith(b'\n') else b''
+    return summarize_runtime_failure(container,result.stdout+separator+result.stderr)
 
 def capture(command, prefix, *, data=None, timeout=600):
     result=subprocess.run(command,input=data,capture_output=True,timeout=timeout)
