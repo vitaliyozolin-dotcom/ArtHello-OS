@@ -2,6 +2,7 @@ import importlib.util
 import json
 from pathlib import Path
 import subprocess
+import sys
 import unittest
 import contextlib
 import io
@@ -157,5 +158,80 @@ class GatewayFailureTests(unittest.TestCase):
             report=audit.gateway_failure_diagnostics()
         self.assertEqual(report['status'],'blocked')
         self.assertNotIn('PRIVATE',json.dumps(report))
+
+
+class GatewayCauseTests(unittest.TestCase):
+    def test_alfa_failures_are_not_mixed_with_health_or_other_routes(self):
+        rows=[
+            {'level':'error','status':502,'msg':'PRIVATE connection reset by peer','ts':1790592642.5,'duration':0.01,'request':{'host':'arthello-188-225-38-55.sslip.io','uri':'/api/integrations/alfacrm?PRIVATE','method':'POST'}},
+            {'level':'error','status':502,'msg':'PRIVATE connection refused','request':{'host':'arthello-188-225-38-55.sslip.io','uri':'/api/health','method':'GET'}},
+            {'level':'error','status':502,'msg':'EOF','request':{'host':'arthello-origin.internal','uri':'/api/integrations/alfacrm','method':'POST'}},
+        ]
+        result=audit.summarize_gateway_failure('\n'.join(json.dumps(row) for row in rows).encode())
+        self.assertEqual(result['alfa']['signals']['connectionReset'],1)
+        self.assertEqual(result['alfa']['signals']['connectionRefused'],0)
+        self.assertEqual(result['alfa']['signals']['eof'],1)
+        self.assertEqual(result['alfa']['statuses']['502'],2)
+        self.assertEqual(result['alfa']['recent'][0]['durationMs'],10)
+        self.assertNotIn('PRIVATE',json.dumps(result))
+
+    def test_gateway_config_summary_inherits_host_scope_and_hides_unrelated_config(self):
+        config={'apps':{'http':{'servers':{'PRIVATE':{'routes':[
+            {'match':[{'host':['arthello-188-225-38-55.sslip.io']}],
+             'handle':[{'handler':'subroute','routes':[{'handle':[
+                 {'handler':'reverse_proxy','upstreams':[{'dial':'arthello-direct-34837407187-1:8081'}],
+                  'transport':{'protocol':'http','keep_alive':{'enabled':False}}}]}]}]},
+            {'match':[{'host':['PRIVATE']}],'handle':[{'handler':'reverse_proxy','upstreams':[{'dial':'PRIVATE'}]}]}
+        ]}}}}}
+        result=audit.summarize_gateway_config(config)
+        self.assertEqual(result['status'],'observed')
+        self.assertEqual(len(result['centralProxies']),1)
+        self.assertEqual(result['centralProxies'][0]['keepAliveEnabled'],False)
+        self.assertTrue(result['centralProxies'][0]['exactCentralUpstream'])
+        self.assertNotIn('PRIVATE',json.dumps(result))
+
+    def test_omitted_keep_alive_reports_caddy_default_explicitly(self):
+        config={'apps':{'http':{'servers':{'server':{'routes':[{
+            'match':[{'host':['arthello-188-225-38-55.sslip.io','PRIVATE']}],
+            'handle':[{'handler':'reverse_proxy','upstreams':[{'dial':'arthello-direct-34837407187-1:8081'}]}]
+        }]}}}}}
+        proxy=audit.summarize_gateway_config(config)['centralProxies'][0]
+        self.assertEqual(proxy['keepAliveSource'],'caddy-default')
+        self.assertEqual(proxy['idleTimeoutNs'],120000000000)
+        self.assertFalse(proxy['exclusiveCentralHostScope'])
+        self.assertNotIn('PRIVATE',json.dumps(proxy))
+
+
+
+    def test_gateway_configuration_read_uses_only_local_admin_get(self):
+        with patch.object(audit.subprocess,'run',return_value=subprocess.CompletedProcess([],0,b'a'*64,b'')),patch.object(audit,'read_bounded_command',return_value=b'{"apps":{"http":{"servers":{}}}}') as read:
+            self.assertEqual(audit.gateway_config_diagnostics()['status'],'observed')
+        self.assertEqual(read.call_args.args[0],['docker','exec','a'*64,'wget','-T','25','-qO-','http://127.0.0.1:2019/config/'])
+
+    def test_configuration_read_failure_does_not_reveal_raw_values(self):
+        with patch.object(audit.subprocess,'run',side_effect=OSError('PRIVATE')):
+            report=audit.gateway_config_diagnostics()
+        self.assertEqual(report['status'],'blocked')
+        self.assertNotIn('PRIVATE',json.dumps(report))
+
+
+
+class BoundedCommandTests(unittest.TestCase):
+    def test_exact_cap_is_accepted(self):
+        data=audit.read_bounded_command([sys.executable,'-c',"import sys;sys.stdout.buffer.write(b'x'*32)"],max_bytes=32)
+        self.assertEqual(data,b'x'*32)
+
+    def test_oversized_stream_is_stopped_before_child_finishes(self):
+        with self.assertRaisesRegex(audit.release.Refused,'GATEWAY_CONFIG_SIZE'):
+            audit.read_bounded_command([sys.executable,'-c',"import sys,time;sys.stdout.buffer.write(b'x'*4096);sys.stdout.flush();time.sleep(10)"],max_bytes=32,timeout=2)
+
+    def test_silent_child_is_stopped_at_deadline(self):
+        with self.assertRaisesRegex(audit.release.Refused,'GATEWAY_CONFIG_TIMEOUT'):
+            audit.read_bounded_command([sys.executable,'-c',"import time;time.sleep(10)"],max_bytes=32,timeout=0.1)
+
+    def test_nonzero_exit_is_not_accepted_as_configuration(self):
+        with self.assertRaisesRegex(audit.release.Refused,'GATEWAY_CONFIG_READ'):
+            audit.read_bounded_command([sys.executable,'-c',"import sys;print('{}');sys.exit(1)"],max_bytes=32)
+
 
 if __name__=='__main__':unittest.main()
