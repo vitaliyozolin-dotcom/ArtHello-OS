@@ -1,3 +1,4 @@
+import { handleEducationConditions } from "../../../lib/education-conditions-handler";
 import { editableFamilyExtras } from "../../../lib/family-card-state";
 import { env } from "cloudflare:workers";
 import { readIdentityIndex } from "../../../lib/entity-identity-db";
@@ -11,6 +12,7 @@ import { getRequestUser } from "../../../lib/request-user";
 export async function GET(request:Request){
   const actor=getRequestUser(request);if(!actor)return Response.json({error:"Требуется вход"},{status:401});
   try{
+    if(new URL(request.url).searchParams.get("action")==="education-conditions")return handleEducationConditions(request);
     await ensureCoreTables();const id=new URL(request.url).searchParams.get("id")?.trim()||"";if(!id)return Response.json({error:"Укажите семью"},{status:400});const db=getDb();
     const identities=await readIdentityIndex(env.DB);if(!identities.cards.some(card=>card.id===id))return Response.json({error:"Семья не найдена"},{status:404});const canonicalId=identities.canonical(id),familyIds=identities.members(id);
     if(familyIds.length>1){
@@ -68,7 +70,9 @@ export async function POST(request:Request){
 export async function PATCH(request:Request){
   const actor=getRequestUser(request);if(!actor)return Response.json({error:"Требуется вход"},{status:401});
   try{
-    await ensureCoreTables();const body=await request.json() as Record<string,unknown>,familyId=clean(body.familyId,80),parentId=clean(body.parentId,80),childId=clean(body.childId,80),values=familyValues(body);if(!familyId||!parentId||!childId)return Response.json({error:"Не хватает связей семьи"},{status:400});if("error" in values)return Response.json({error:values.error},{status:400});const db=getDb(),now=new Date().toISOString();await assertOperationIds(values.operationIds);
+    const body=await request.json() as Record<string,unknown>;
+    if(body.action==="education-conditions")return handleEducationConditions(request,body);
+    await ensureCoreTables();const familyId=clean(body.familyId,80),parentId=clean(body.parentId,80),childId=clean(body.childId,80),values=familyValues(body);if(!familyId||!parentId||!childId)return Response.json({error:"Не хватает связей семьи"},{status:400});if("error" in values)return Response.json({error:values.error},{status:400});const db=getDb(),now=new Date().toISOString();await assertOperationIds(values.operationIds);
     const[currentFamily]=await db.select().from(entities).where(eq(entities.id,familyId)).limit(1);if(!currentFamily||currentFamily.entityType!=="Семья")return Response.json({error:"Семья не найдена"},{status:404});
     if(currentFamily.status==="Объединена")return Response.json({error:"Откройте основную карточку"},{status:409});
     const identities=await readIdentityIndex(env.DB);const familyIds=identities.members(familyId);

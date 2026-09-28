@@ -1,5 +1,6 @@
 /* eslint-disable @next/next/no-assign-module-variable */
 import { env } from "cloudflare:workers";
+import { educationConditionKey, permitsEnrollment } from '../../../../lib/education-conditions';
 import { schoolSchedule } from '../../../../lib/school-schedule-data';
 import { buildDiaryDirectory, type DirectoryClass } from '../../../../lib/diary-directory';
 import { customerPolicy, previewCustomers, resolveCustomerStatuses, compareCustomerProjections } from "../../../../lib/alfacrm-customer-policy";
@@ -1562,6 +1563,9 @@ async function canonicalizeGroups(rows: FetchedRecord[], state: AlfaState, local
 
 async function syncMembershipsFromFamilyRaw(state: AlfaState, actor: string, deferredKey = state.modules.families.deferredCustomer?.key ?? '') {
   const identities = await readIdentityIndex(env.DB);
+  const conditionRows = await env.DB.prepare("SELECT state_key,state_value FROM system_runtime_state WHERE state_key LIKE 'education_conditions:%'").all<{state_key:string;state_value:string}>();
+  const conditions = new Map<string, unknown>();
+  for (const row of conditionRows.results) { try { conditions.set(row.state_key, JSON.parse(row.state_value)); } catch { /* fail closed */ } }
   const deferredSourceChild = deferredKey ? `CHD-A-${await shortHash(deferredKey)}` : '';
   const deferredChild = deferredSourceChild && identities.cards.some(card => card.id === deferredSourceChild)
     ? identities.canonical(deferredSourceChild) : '';
@@ -1586,10 +1590,10 @@ async function syncMembershipsFromFamilyRaw(state: AlfaState, actor: string, def
     const sourceChildId = `CHD-A-${await shortHash(`${row.remote_branch_id}:${studentId}`)}`;
     const sourceCard = identities.cards.find(card => card.id === sourceChildId);
     const sourceMetadata = sourceCard ? JSON.parse(sourceCard.metadata) as JsonRecord : {};
-    // An open enquiry or lead is not an enrollment. Unverified single visits
-    // require the same explicit current group evidence as an active customer.
-    if (!['active', 'unverified'].includes(scalar(sourceMetadata.customerLifecycle))) continue;
-    const childId = identities.canonical(`CHD-A-${await shortHash(`${row.remote_branch_id}:${studentId}`)}`);
+    const childId = identities.canonical(sourceChildId);
+    // Payment conditions are a separate owner decision, never inferred from an open enquiry.
+    const condition = conditions.get(educationConditionKey(childId, row.remote_branch_id));
+    if (!permitsEnrollment(scalar(sourceMetadata.customerLifecycle), condition, childId, row.remote_branch_id)) continue;
     const familyId = identities.canonical(`FAM-A-${await shortHash(`${row.remote_branch_id}:student:${studentId}`)}`);
     for (const remoteGroupId of groupIds(item)) {
       const groupId = await localGroupId(row.remote_branch_id, remoteGroupId);

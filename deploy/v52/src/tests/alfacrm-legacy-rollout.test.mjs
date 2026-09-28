@@ -13,6 +13,7 @@ const identityDbUrl = dataModule(stripTypeScriptTypes(readFileSync(resolve('lib/
 const fixture = { env: {}, actor: null, secretReads: 0, secretWrites: 0, calls: [] };
 globalThis.__alfaLegacyRollout = fixture;
 const adapters = {
+  '../../../../lib/education-conditions': tsModule('lib/education-conditions.ts'),
   'cloudflare:workers': dataModule('export const env=globalThis.__alfaLegacyRollout.env;'),
   '../../../../lib/entity-identity': identityUrl,
   '../../../../lib/entity-identity-db': identityDbUrl,
