@@ -32,7 +32,7 @@ test('missing session, non-owner, bad csrf and untrusted origin cannot save',asy
   }
 });
 test('unrelated, inactive, ambiguous and absent source cards are rejected',async()=>{
-  for(const mutate of [f=>f.sql.exec('DELETE FROM entity_links'),f=>{f.cards[1].status='Архив';},f=>{f.index.members=()=>['CH-TEST','OTHER'];},f=>f.sql.exec('UPDATE alfacrm_current_records SET active=0'),f=>{f.cards[1].metadata='{}';}]){
+  for(const mutate of [f=>f.sql.exec('DELETE FROM entity_links'),f=>{f.cards[1].status='Архив';},f=>f.sql.exec('UPDATE alfacrm_current_records SET active=0'),f=>{f.cards[1].metadata='{}';}]){
     const f=fixture();mutate(f);assert.equal((await f.handler(f.request,f.body)).status,409);assert.equal(f.count(),0);
   }
 });
@@ -45,4 +45,17 @@ test('revocation is explicit and audited without deleting history',async()=>{
   const stored=JSON.parse(f.sql.prepare('SELECT state_value FROM system_runtime_state').get().state_value);
   assert.equal(permitsEnrollment('open',stored,'CH-TEST','8'),false);
   assert.equal(f.sql.prepare('SELECT count(*) AS n FROM audit_events').get().n,2);
+});
+test('merged child requires explicit validated branch; decision never leaks to another branch',async()=>{
+  const f=fixture();f.cards.push({...f.cards[1],id:'CH-ALIAS',scope:'Second branch',metadata:JSON.stringify({remoteBranchId:'9',alfaCustomerId:'456',customerLifecycle:'open'})});
+  f.index.members=id=>id==='CH-TEST'?['CH-TEST','CH-ALIAS']:[id];
+  f.index.canonical=id=>id==='CH-ALIAS'?'CH-TEST':id;
+  f.sql.exec("INSERT INTO alfacrm_current_records VALUES('families','9','456',1,'OBS');");
+  const get=new Request('https://school.example.test/api/families?action=education-conditions&familyId=F-TEST&childId=CH-TEST');
+  const choices=await (await f.handler(get)).json();assert.equal(choices.selectionRequired,true);assert.equal(choices.branches.length,2);
+  assert.equal((await f.handler(f.request,f.body)).status,409);
+  assert.equal((await f.handler(f.request,{...f.body,remoteBranchId:'99'})).status,409);
+  assert.equal((await f.handler(f.request,{...f.body,remoteBranchId:'9'})).status,200);
+  const stored=JSON.parse(f.sql.prepare('SELECT state_value FROM system_runtime_state').get().state_value);
+  assert.equal(permitsEnrollment('open',stored,'CH-TEST','9'),true);assert.equal(permitsEnrollment('open',stored,'CH-TEST','8'),false);
 });
