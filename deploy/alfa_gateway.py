@@ -58,13 +58,63 @@ def desired_config(config):
 
 def render_routes(source):
     require(isinstance(source, str) and 0 < len(source.encode()) <= 1_000_000 and '\r' not in source and '\0' not in source, 'GATEWAY_ROUTE_SIZE')
-    pattern = re.compile(r'(?m)^([ \t]*)reverse_proxy ' + re.escape(UPSTREAM) + r'[ \t]*\n')
-    require(len(pattern.findall(source)) == 1, 'GATEWAY_ROUTE_AMBIGUOUS')
-    def replace(match):
-        indent = match[1]
-        return (indent + 'reverse_proxy ' + UPSTREAM + ' {\n' + indent + '  transport http {\n'
-                + indent + '    keepalive off\n' + indent + '  }\n' + indent + '}\n')
-    return pattern.sub(replace, source)
+    # Reuse the bounded structural Caddy lexer already used by protected cutovers.
+    # The subsequent real-Caddy adaptation proves the complete semantic diff.
+    path = Path(__file__).resolve().parents[1] / '.github/scripts/d083-maintenance-route.py'
+    spec = importlib.util.spec_from_file_location('gateway_route_lexer', path)
+    lexer = importlib.util.module_from_spec(spec); spec.loader.exec_module(lexer)
+    try: parsed = lexer.tokens(source)
+    except Exception: raise Refused('GATEWAY_ROUTE_SYNTAX') from None
+    values = [token[0] for token in parsed]
+    stack, depths, pairs = [], [], {}
+    for i, value in enumerate(values):
+        depths.append(len(stack))
+        if value == '{': stack.append(i)
+        elif value == '}':
+            require(bool(stack), 'GATEWAY_ROUTE_SYNTAX')
+            pairs[stack.pop()] = i
+    require(not stack, 'GATEWAY_ROUTE_SYNTAX')
+    hosts = [i for i, value in enumerate(values) if value in (HOST, 'https://' + HOST)]
+    require(len(hosts) == 1, 'GATEWAY_HOST_AMBIGUOUS')
+    host = hosts[0]
+    require(depths[host] == 0 and (host == 0 or values[host - 1] == '}')
+            and host + 1 < len(values) and values[host + 1] == '{'
+            and parsed[host][3] == parsed[host + 1][3], 'GATEWAY_HOST_SCOPE')
+    host_open = host + 1; host_close = pairs[host_open]
+    candidates = [i for i in range(host_open + 1, host_close) if values[i] in (UPSTREAM, 'http://' + UPSTREAM)]
+    require(len(candidates) == 1, 'GATEWAY_ROUTE_AMBIGUOUS')
+    upstream = candidates[0]; directive = upstream - 1
+    require(directive >= 0 and values[directive] == 'reverse_proxy'
+            and parsed[directive][3] == parsed[upstream][3], 'GATEWAY_ROUTE_DIRECTIVE')
+    start = parsed[directive][1]
+    indent = source[source.rfind('\n', 0, start) + 1:start]
+    require(not indent.strip(), 'GATEWAY_ROUTE_INDENT')
+    next_index = upstream + 1
+    block = next_index < len(values) and values[next_index] == '{' and parsed[next_index][3] == parsed[upstream][3]
+    if not block:
+        require(next_index == len(values) or parsed[next_index][3] > parsed[upstream][3], 'GATEWAY_ROUTE_ARGUMENTS')
+        end = parsed[upstream][2]; newline = source.find('\n', end)
+        require(newline >= 0, 'GATEWAY_ROUTE_NEWLINE')
+        return (source[:end] + ' {' + source[end:newline + 1] + indent + '  transport http {\n'
+                + indent + '    keepalive off\n' + indent + '  }\n' + indent + '}\n' + source[newline + 1:])
+    opening = next_index; closing = pairs[opening]
+    transports = [i for i in range(opening + 1, closing)
+                  if depths[i] == depths[opening] + 1 and values[i] == 'transport']
+    require(len(transports) <= 1, 'GATEWAY_TRANSPORT_AMBIGUOUS')
+    if transports:
+        i = transports[0]
+        require(values[i:i + 3] == ['transport', 'http', '{'] and parsed[i][3] == parsed[i + 2][3], 'GATEWAY_TRANSPORT_SYNTAX')
+        opening = i + 2
+        require(not any(values[j] == 'keepalive' for j in range(opening + 1, pairs[opening])), 'GATEWAY_KEEPALIVE_CHANGED')
+        transport_start = parsed[i][1]
+        transport_indent = source[source.rfind('\n', 0, transport_start) + 1:transport_start]
+        require(not transport_indent.strip(), 'GATEWAY_ROUTE_INDENT')
+        addition = transport_indent + '  keepalive off\n'
+    else:
+        addition = indent + '  transport http {\n' + indent + '    keepalive off\n' + indent + '  }\n'
+    newline = source.find('\n', parsed[opening][2])
+    require(newline >= 0 and (opening + 1 == pairs[opening] or parsed[opening + 1][3] > parsed[opening][3]), 'GATEWAY_ROUTE_NEWLINE')
+    return source[:newline + 1] + addition + source[newline + 1:]
 
 
 def repair(release, work, run_key, current_main, *, audit=None):
