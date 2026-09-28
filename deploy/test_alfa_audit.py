@@ -2,6 +2,7 @@ import importlib.util
 import json
 from pathlib import Path
 import subprocess
+import sys
 import unittest
 import contextlib
 import io
@@ -203,19 +204,34 @@ class GatewayCauseTests(unittest.TestCase):
 
 
     def test_gateway_configuration_read_uses_only_local_admin_get(self):
-        def run(command,**kwargs):
-            self.assertEqual(kwargs['timeout'],30)
-            if command[:2]==['docker','ps']:return subprocess.CompletedProcess(command,0,b'a'*64,b'')
-            self.assertEqual(command,['docker','exec','a'*64,'wget','-qO-','http://127.0.0.1:2019/config/'])
-            return subprocess.CompletedProcess(command,0,b'{"apps":{"http":{"servers":{}}}}',b'')
-        with patch.object(audit.subprocess,'run',side_effect=run):
+        with patch.object(audit.subprocess,'run',return_value=subprocess.CompletedProcess([],0,b'a'*64,b'')),patch.object(audit,'read_bounded_command',return_value=b'{"apps":{"http":{"servers":{}}}}') as read:
             self.assertEqual(audit.gateway_config_diagnostics()['status'],'observed')
+        self.assertEqual(read.call_args.args[0],['docker','exec','a'*64,'wget','-T','25','-qO-','http://127.0.0.1:2019/config/'])
 
     def test_configuration_read_failure_does_not_reveal_raw_values(self):
         with patch.object(audit.subprocess,'run',side_effect=OSError('PRIVATE')):
             report=audit.gateway_config_diagnostics()
         self.assertEqual(report['status'],'blocked')
         self.assertNotIn('PRIVATE',json.dumps(report))
+
+
+
+class BoundedCommandTests(unittest.TestCase):
+    def test_exact_cap_is_accepted(self):
+        data=audit.read_bounded_command([sys.executable,'-c',"import sys;sys.stdout.buffer.write(b'x'*32)"],max_bytes=32)
+        self.assertEqual(data,b'x'*32)
+
+    def test_oversized_stream_is_stopped_before_child_finishes(self):
+        with self.assertRaisesRegex(audit.release.Refused,'GATEWAY_CONFIG_SIZE'):
+            audit.read_bounded_command([sys.executable,'-c',"import sys,time;sys.stdout.buffer.write(b'x'*4096);sys.stdout.flush();time.sleep(10)"],max_bytes=32,timeout=2)
+
+    def test_silent_child_is_stopped_at_deadline(self):
+        with self.assertRaisesRegex(audit.release.Refused,'GATEWAY_CONFIG_TIMEOUT'):
+            audit.read_bounded_command([sys.executable,'-c',"import time;time.sleep(10)"],max_bytes=32,timeout=0.1)
+
+    def test_nonzero_exit_is_not_accepted_as_configuration(self):
+        with self.assertRaisesRegex(audit.release.Refused,'GATEWAY_CONFIG_READ'):
+            audit.read_bounded_command([sys.executable,'-c',"import sys;print('{}');sys.exit(1)"],max_bytes=32)
 
 
 if __name__=='__main__':unittest.main()

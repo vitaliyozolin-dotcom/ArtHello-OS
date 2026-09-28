@@ -7,6 +7,8 @@ import os
 from pathlib import Path
 import re
 import subprocess
+import selectors
+import time
 import tempfile
 from contextlib import contextmanager
 
@@ -199,6 +201,29 @@ def summarize_gateway_config(config):
     return {'status':'observed','centralProxies':proxies,
         'configSha256':hashlib.sha256(json.dumps(config,sort_keys=True,separators=(',',':')).encode()).hexdigest()}
 
+
+def read_bounded_command(command, *, max_bytes=2_000_000, timeout=30):
+    deadline=time.monotonic()+timeout
+    output=bytearray()
+    with subprocess.Popen(command,stdout=subprocess.PIPE,stderr=subprocess.DEVNULL) as process:
+        try:
+            with selectors.DefaultSelector() as selector:
+                selector.register(process.stdout,selectors.EVENT_READ)
+                while True:
+                    remaining=deadline-time.monotonic()
+                    require(remaining>0,'GATEWAY_CONFIG_TIMEOUT')
+                    require(bool(selector.select(remaining)),'GATEWAY_CONFIG_TIMEOUT')
+                    chunk=os.read(process.stdout.fileno(),min(65536,max_bytes+1-len(output)))
+                    if not chunk:break
+                    output.extend(chunk)
+                    require(len(output)<=max_bytes,'GATEWAY_CONFIG_SIZE')
+            require(process.wait(timeout=max(0.001,deadline-time.monotonic()))==0,'GATEWAY_CONFIG_READ')
+            return bytes(output)
+        finally:
+            if process.poll() is None:
+                process.kill()
+                process.wait(timeout=5)
+
 def gateway_config_diagnostics():
     try:
         found=subprocess.run(['docker','ps','--no-trunc','--filter','ancestor='+GATEWAY_IMAGE,
@@ -206,10 +231,8 @@ def gateway_config_diagnostics():
         ids=found.stdout.decode('ascii',errors='replace').split()
         if found.returncode!=0 or len(ids)!=1 or not re.fullmatch(r'[a-f0-9]{64}',ids[0]):
             return {'status':'blocked','reason':'GATEWAY_IDENTITY_UNCONFIRMED'}
-        result=subprocess.run(['docker','exec',ids[0],'wget','-qO-','http://127.0.0.1:2019/config/'],capture_output=True,timeout=30)
-        if result.returncode!=0 or len(result.stdout)>2_000_000:
-            return {'status':'blocked','reason':'GATEWAY_CONFIG_READ_UNCONFIRMED'}
-        return summarize_gateway_config(json.loads(result.stdout))
+        data=read_bounded_command(['docker','exec',ids[0],'wget','-T','25','-qO-','http://127.0.0.1:2019/config/'])
+        return summarize_gateway_config(json.loads(data))
     except Exception:
         return {'status':'blocked','reason':'GATEWAY_CONFIG_UNCONFIRMED'}
 

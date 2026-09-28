@@ -1256,3 +1256,5 @@ Decision: retain bounded reads and fixed-output privacy rules; add an Alfa-only 
 Caddy official reverse_proxy documentation describes HTTP/1.1 non-idempotent 502 responses when proxy keepalive exceeds upstream timeout. This is a hypothesis to check against route-specific production evidence, not the established root cause: https://caddyserver.com/docs/caddyfile/directives/reverse_proxy .
 
 Validation: three new behavior tests failed before implementation; all 19 audit tests pass afterwards, including route isolation, inherited host scope, default/disabled keepalive, bounded local read and private-error non-disclosure. git diff --check passes. Production cause and issue #606 remain open.
+
+D256 review correction: enforce the 2 MB configuration cap during incremental pipe reads, not after capture. The reader uses a 30-second monotonic deadline, discards stderr, kills/reaps the client on overflow/timeout, and bounds the in-container wget to 25 seconds. Process tests cover exact cap, early rejection of an oversized unfinished stream, a silent-child timeout and nonzero exit. All 23 audit tests pass.
