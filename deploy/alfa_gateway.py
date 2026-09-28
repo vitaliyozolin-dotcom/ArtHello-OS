@@ -117,6 +117,25 @@ def render_routes(source):
     return source[:newline + 1] + addition + source[newline + 1:]
 
 
+def staged_config(config, source_paths):
+    """Caddy file_server automatically hides the source Caddyfile by its path.
+
+    Predict this exact adapter-only change for staging. Live readback still
+    compares the unmodified expected config, including every original hide.
+    """
+    result = copy.deepcopy(config)
+    def walk(value):
+        if isinstance(value, dict):
+            if value.get('handler') == 'file_server' and isinstance(value.get('hide'), list):
+                value['hide'] = [source_paths.get(item, item) if isinstance(item, str) else item for item in value['hide']]
+            for child in value.values():
+                if isinstance(child, (dict, list)): walk(child)
+        elif isinstance(value, list):
+            for child in value: walk(child)
+    walk(result)
+    return result
+
+
 def repair(release, work, run_key, current_main, *, audit=None):
     # The protected release already verified owner, exact main, all three CI gates,
     # application predecessor and artifact provenance before entering here.
@@ -171,7 +190,7 @@ def repair(release, work, run_key, current_main, *, audit=None):
     write(staged, candidate)
     write(staged_main, main_bytes.replace(b'import /data/external-routes.caddy', ('import ' + staged).encode()))
     require(file(backup) == route_bytes and file(staged) == candidate, 'GATEWAY_BACKUP_READBACK')
-    require(adapt(staged_main) == expected, 'GATEWAY_UNEXPECTED_CONFIG_DIFF')
+    require(adapt(staged_main) == staged_config(expected, {main: staged_main, route: staged}), 'GATEWAY_UNEXPECTED_CONFIG_DIFF')
     release.docker('exec', gateway, 'caddy', 'validate', '--config', staged_main, '--adapter', 'caddyfile')
     journal = work / 'gateway-operation.json'
     receipt = {'decision': 'D257', 'gatewayId': gateway, 'beforeSha256': digest(before), 'afterSha256': digest(expected), 'backupPath': backup, 'businessDataChanged': False}
