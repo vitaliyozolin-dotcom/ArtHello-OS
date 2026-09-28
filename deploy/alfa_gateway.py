@@ -74,7 +74,14 @@ def render_routes(source):
             require(bool(stack), 'GATEWAY_ROUTE_SYNTAX')
             pairs[stack.pop()] = i
     require(not stack, 'GATEWAY_ROUTE_SYNTAX')
-    candidates = [i for i, value in enumerate(values) if value in (UPSTREAM, 'http://' + UPSTREAM)]
+    hosts = [i for i, value in enumerate(values) if value in (HOST, 'https://' + HOST)]
+    require(len(hosts) == 1, 'GATEWAY_HOST_AMBIGUOUS')
+    host = hosts[0]
+    require(depths[host] == 0 and (host == 0 or values[host - 1] == '}')
+            and host + 1 < len(values) and values[host + 1] == '{'
+            and parsed[host][3] == parsed[host + 1][3], 'GATEWAY_HOST_SCOPE')
+    host_open = host + 1; host_close = pairs[host_open]
+    candidates = [i for i in range(host_open + 1, host_close) if values[i] in (UPSTREAM, 'http://' + UPSTREAM)]
     require(len(candidates) == 1, 'GATEWAY_ROUTE_AMBIGUOUS')
     upstream = candidates[0]; directive = upstream - 1
     require(directive >= 0 and values[directive] == 'reverse_proxy'

@@ -233,6 +233,16 @@ class GatewayTests(unittest.TestCase):
             if 'dial_timeout' in source: self.assertIn('dial_timeout 5s', result)
             self.assertEqual(result.count('reverse_proxy'), 1)
 
+    def test_gateway_scopes_repeated_upstream_to_central_host_only(self):
+        g = self.module()
+        central = g.HOST + ' {\n  reverse_proxy ' + g.UPSTREAM + '\n}\n'
+        pay = 'pay.example {\n  handle /api/* {\n    reverse_proxy ' + g.UPSTREAM + '\n  }\n  handle {\n    reverse_proxy ' + g.UPSTREAM + '\n  }\n}\n'
+        result = g.render_routes(central + pay)
+        self.assertEqual(result, g.render_routes(central) + pay)
+        self.assertEqual(result.count('keepalive off'), 1)
+        for source in (central + central + pay, central.replace(g.HOST, g.HOST + ',other.example') + pay):
+            with self.assertRaises(ValueError): g.render_routes(source)
+
     def exercise_repair(self, fail_health=False, drift=False):
         from types import SimpleNamespace
         import copy
