@@ -246,7 +246,10 @@ class GatewayTests(unittest.TestCase):
     def exercise_repair(self, fail_health=False, drift=False):
         from types import SimpleNamespace
         import copy
-        g = self.module(); before = self.config(); expected = g.desired_config(before)
+        g = self.module(); before = self.config()
+        before['apps']['http']['servers']['srv0']['routes'].append(
+            {'handle': [{'handler': 'file_server', 'hide': ['/etc/caddy/Caddyfile', '/data/external-routes.caddy', '/private/*']}]})
+        expected = g.desired_config(before)
         state = {'config': copy.deepcopy(before), 'health': 0, 'writes': 0}
         gateway = 'b' * 64; image = 'sha256:' + 'c' * 64
         main = '/etc/caddy/Caddyfile'; route = '/data/external-routes.caddy'
@@ -256,7 +259,13 @@ class GatewayTests(unittest.TestCase):
             imported = files[path].decode().strip().split(' ')[1]
             value = expected if b'keepalive off' in files[imported] else before
             if drift and path == main: return {'unexpected': True}
-            return copy.deepcopy(value)
+            result = copy.deepcopy(value)
+            for row in result['apps']['http']['servers']['srv0']['routes']:
+                for handler in row.get('handle', []):
+                    if handler.get('handler') == 'file_server':
+                        handler['hide'][0] = path
+                        handler['hide'][1] = imported
+            return result
         def read(command, **kwargs):
             if command[1] == 'ps': return gateway.encode()
             if command[3] == 'wget': return json.dumps(state['config']).encode()
@@ -303,6 +312,24 @@ class GatewayTests(unittest.TestCase):
                 writes = state['writes']
                 repeated = g.repair(runtime, retry, '124-1', lambda: None, audit=audit)
                 self.assertTrue(repeated['alreadyApplied']); self.assertEqual(state['writes'], writes)
+
+    def test_staged_config_changes_only_exact_file_server_source_hide(self):
+        g = self.module()
+        original = {'handle': [
+            {'handler': 'file_server', 'hide': ['/etc/caddy/Caddyfile', '/private/*']},
+            {'handler': 'file_server', 'hide': ['/etc/caddy/Caddyfile']},
+            {'handler': 'other', 'hide': ['/etc/caddy/Caddyfile']},
+            {'handler': 'file_server', 'hide': ['/etc/caddy/Caddyfile.backup']},
+        ]}
+        before = json.dumps(original, sort_keys=True)
+        candidate = g.staged_config(original, {'/etc/caddy/Caddyfile': '/data/d257-123-1.Caddyfile'})
+        self.assertEqual(json.dumps(original, sort_keys=True), before)
+        self.assertEqual(candidate['handle'][0]['hide'], ['/data/d257-123-1.Caddyfile', '/private/*'])
+        self.assertEqual(candidate['handle'][1]['hide'], ['/data/d257-123-1.Caddyfile'])
+        self.assertEqual(candidate['handle'][2:], original['handle'][2:])
+        altered = json.loads(json.dumps(candidate))
+        altered['handle'][0]['hide'].remove('/private/*')
+        self.assertNotEqual(altered, candidate)
 
     def test_gateway_durable_apply_and_readback(self):
         self.exercise_repair()
