@@ -162,6 +162,10 @@ PINS = {
 
 # Exact verified D194 #75 receipt; do not accept a label without its container and image.
 CENTRAL_PREDECESSORS = {
+    # Protected release #104, run 36411431413; audit #108 confirms source/runtime.
+    ('d39fb05d6dc27dfba29fd65adf2ff41e5b9d1a2a',
+     '0fdf3cb668f581e7ce161e6000c61028888560e20f576e0b8086d3b8a5f137c1',
+     'sha256:f1adcdfd06d3072ce182351b0fb5e9c17d8d01f00cbf6d8f9c397795f59ea497'),
     # Verified release #100, run 36406660132; audit #102 confirms current source.
     ('5320821c5780fc3e52147ff230c5799dd555b3e2',
      '1913e18fd2ca45cf2be27d1d8580b3154868cd76d28b4d31c8d675d8a09a5c76',
@@ -467,9 +471,15 @@ def main():
                 and old['Image'] == 'sha256:38b25e525cbcbebff5e581840138f01f5f89dd7aa521eecec0ba5b15fd1bca93', 'PREDECESSOR_INVENTORY')
     plan = runtime_plan(old, system, image, image_source, image_tree)
     public_health()
+    gateway_receipt = None
+    if system == 'central':
+        spec = importlib.util.spec_from_file_location('gateway', ROOT / 'deploy/alfa_gateway.py')
+        gateway = importlib.util.module_from_spec(spec); spec.loader.exec_module(gateway)
+        gateway_receipt = gateway.repair(sys.modules[__name__], work, run_key, current_main)
+        checkpoint('central-gateway-keepalive-verified')
     result = upgrade(old, plan, work, run_key, current_main)
     receipt = {'decision': 'D194', 'state': 'runtime-verified', 'controllerSha': source, 'verificationRuns': runs,
-               'result': result, 'alfaImportApplied': False, 'diaryDirectoryApplied': False}
+               'result': result, 'gateway': gateway_receipt, 'alfaImportApplied': False, 'diaryDirectoryApplied': False}
     (work / 'receipt.json').write_text(json.dumps(receipt, indent=2))
     print(json.dumps(receipt))
 

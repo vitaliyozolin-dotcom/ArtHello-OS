@@ -177,5 +177,116 @@ class ReleaseTests(unittest.TestCase):
                                              recovery_checks=1, required_successes=1)
 
 
+class GatewayTests(unittest.TestCase):
+    def module(self):
+        spec = importlib.util.spec_from_file_location('gateway', Path(__file__).with_name('alfa_gateway.py'))
+        module = importlib.util.module_from_spec(spec); spec.loader.exec_module(module)
+        return module
+
+    def config(self):
+        return {'apps': {'http': {'servers': {'srv0': {'routes': [
+            {'match': [{'host': ['arthello-188-225-38-55.sslip.io']}],
+             'handle': [{'handler': 'reverse_proxy', 'upstreams': [{'dial': 'arthello-direct-34837407187-1:8081'}]}]},
+            {'match': [{'host': ['unrelated.example']}], 'handle': [{'handler': 'reverse_proxy', 'upstreams': [{'dial': 'other:3000'}]}]}
+        ]}}}}}
+
+    def test_gateway_only_changes_exact_central_connection_reuse(self):
+        g = self.module(); original = self.config(); before = json.dumps(original, sort_keys=True)
+        desired = g.desired_config(original)
+        self.assertEqual(json.dumps(original, sort_keys=True), before)
+        routes = desired['apps']['http']['servers']['srv0']['routes']
+        self.assertEqual(routes[0]['handle'][0]['transport'], {'protocol': 'http', 'keep_alive': {'enabled': False}})
+        self.assertEqual(routes[1], original['apps']['http']['servers']['srv0']['routes'][1])
+
+    def test_gateway_rejects_shared_ambiguous_or_changed_target(self):
+        g = self.module()
+        for mutate in (
+            lambda routes: routes[0]['match'][0]['host'].append('other.example'),
+            lambda routes: routes[0]['match'].append({}),
+            lambda routes: routes.append(routes[0]),
+            lambda routes: routes[0]['handle'][0]['upstreams'].append({'dial': 'other:8081'}),
+            lambda routes: routes[0]['handle'][0].update(transport={'protocol': 'http', 'tls': {}}),
+        ):
+            value = self.config(); mutate(value['apps']['http']['servers']['srv0']['routes'])
+            with self.assertRaises(ValueError): g.desired_config(value)
+
+    def test_gateway_renderer_preserves_all_other_bytes(self):
+        g = self.module()
+        source = '# comment\narthello-188-225-38-55.sslip.io {\n  encode gzip\n  reverse_proxy arthello-direct-34837407187-1:8081\n}\nother.example {\n reverse_proxy other:3000\n}\n'
+        result = g.render_routes(source)
+        self.assertEqual(result, source.replace('  reverse_proxy arthello-direct-34837407187-1:8081\n', '  reverse_proxy arthello-direct-34837407187-1:8081 {\n    transport http {\n      keepalive off\n    }\n  }\n'))
+        for bad in (source + source, source.replace(':8081\n', ':8081 {\n'), source.replace(':8081\n', ':8081 # comment\n')):
+            with self.assertRaises(ValueError): g.render_routes(bad)
+
+    def exercise_repair(self, fail_health=False, drift=False):
+        from types import SimpleNamespace
+        import copy
+        g = self.module(); before = self.config(); expected = g.desired_config(before)
+        state = {'config': copy.deepcopy(before), 'health': 0, 'writes': 0}
+        gateway = 'b' * 64; image = 'sha256:' + 'c' * 64
+        main = '/etc/caddy/Caddyfile'; route = '/data/external-routes.caddy'
+        original = b'arthello-188-225-38-55.sslip.io {\n reverse_proxy arthello-direct-34837407187-1:8081\n}\n'
+        files = {main: b'import /data/external-routes.caddy\n', route: original}
+        def adapted(path):
+            imported = files[path].decode().strip().split(' ')[1]
+            value = expected if b'keepalive off' in files[imported] else before
+            if drift and path == main: return {'unexpected': True}
+            return copy.deepcopy(value)
+        def read(command, **kwargs):
+            if command[1] == 'ps': return gateway.encode()
+            if command[3] == 'wget': return json.dumps(state['config']).encode()
+            if command[3] == 'cat': return files[command[4]]
+            if command[3:5] == ['caddy', 'adapt']: return json.dumps(adapted(command[6])).encode()
+            raise AssertionError(command)
+        def docker(*args, **kwargs):
+            args = list(args)
+            if args[:2] == ['exec', '-i']:
+                path = args[-1]; self.assertNotIn(path, files); files[path] = kwargs['input']; state['writes'] += 1
+            elif args[2:4] == ['caddy', 'reload']: state['config'] = adapted(main)
+            elif args[2:4] == ['caddy', 'validate']: pass
+            elif args[2:4] == ['sh', '-ceu']:
+                if args[4].startswith('mv '): files[args[-1]] = files.pop(args[-2])
+                elif args[4].startswith('cp -p '): files[args[-1]] = files[args[-3]]
+                else: raise AssertionError(args)
+            else: raise AssertionError(args)
+            return b''
+        def health():
+            state['health'] += 1
+            if fail_health and state['health'] == 1: raise RuntimeError('synthetic health failure')
+        inspected = {'State': {'Running': True}, 'Image': image,
+                     'Config': {'Cmd': ['caddy', 'run', '--config', main, '--adapter', 'caddyfile']},
+                     'Mounts': [{'Type': 'volume', 'Destination': '/data', 'RW': True}]}
+        runtime = SimpleNamespace(inspect=lambda _: inspected, docker=docker, public_health=health)
+        audit = SimpleNamespace(read_bounded_command=read, GATEWAY_IMAGE=image)
+        with tempfile.TemporaryDirectory() as directory, patch.object(g, 'OBSERVED_CONFIG', g.digest(before)):
+            work = Path(directory) / 'd194-123-1'; work.mkdir()
+            if drift:
+                with self.assertRaisesRegex(ValueError, 'GATEWAY_DISK_RUNTIME_DRIFT'):
+                    g.repair(runtime, work, '123-1', lambda: None, audit=audit)
+                self.assertEqual(state['writes'], 0)
+            elif fail_health:
+                with self.assertRaisesRegex(RuntimeError, 'synthetic health failure'):
+                    g.repair(runtime, work, '123-1', lambda: None, audit=audit)
+                self.assertEqual(state['config'], before); self.assertEqual(files[route], original)
+                self.assertEqual(json.loads((work / 'gateway-operation.json').read_text())['phase'], 'rolled-back')
+            else:
+                receipt = g.repair(runtime, work, '123-1', lambda: None, audit=audit)
+                self.assertEqual(receipt['phase'], 'verified'); self.assertEqual(state['config'], expected)
+                self.assertEqual(files['/data/d257-123-1.before'], original)
+                self.assertIn(b'keepalive off', files[route])
+                retry = Path(directory) / 'd194-124-1'; retry.mkdir()
+                writes = state['writes']
+                repeated = g.repair(runtime, retry, '124-1', lambda: None, audit=audit)
+                self.assertTrue(repeated['alreadyApplied']); self.assertEqual(state['writes'], writes)
+
+    def test_gateway_durable_apply_and_readback(self):
+        self.exercise_repair()
+
+    def test_gateway_health_failure_restores_bytes_and_live_config(self):
+        self.exercise_repair(fail_health=True)
+
+    def test_gateway_disk_runtime_drift_prevents_any_write(self):
+        self.exercise_repair(drift=True)
+
 if __name__ == '__main__':
     unittest.main()
