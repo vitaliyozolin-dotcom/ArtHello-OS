@@ -12,7 +12,8 @@ ROOT=Path(__file__).resolve().parents[1]
 # Previously accepted School key; D065/R17 protected School transport.
 SCHOOL_HOST_PIN='SHA256:/kBNohTF+5g8U+jQt+PzOCoWZ9yCSFjBnEP3Oc3MwRI'
 # Exact central source from successful protected release 36269374177.
-AUDIT_CENTRAL_LIVE=('0210d4c7dabe5376d892c7058ffab74b36185a64',
+AUDIT_CENTRAL_LIVE=('5320821c5780fc3e52147ff230c5799dd555b3e2',
+                    '0210d4c7dabe5376d892c7058ffab74b36185a64',
                     'cc8cff9c2a396a97aeb6daf8dc0907a72f5587fa',
                     '49cea8d5f69d356e16c6aa88ecc8a7e93cef417d',
                     'd83da0ce8311a4b60832031a217b91c7dd6bb1c8',
@@ -25,6 +26,44 @@ def load(name):
 release=load('alfa_release')
 artifacts=load('alfa_artifact')
 require=release.require
+
+def summarize_runtime_failure(container, raw):
+    # Fixed counters only: never return log lines, exception values, env or paths.
+    lines=raw.decode('utf-8',errors='replace').splitlines()
+    patterns={
+        'crossRequestIo':'Cannot perform I/O on behalf of a different request',
+        'alfaActionFailed':'alfacrm.staged_action_failed',
+        'fetchFailed':'fetch failed',
+        'uncaughtException':'Uncaught',
+        'memoryLimit':'Memory limit exceeded',
+        'outOfMemory':'out of memory',
+        'cpuLimit':'CPU time limit exceeded',
+        'scriptWillNeverComplete':'The script will never generate a response',
+        'cancelledIo':'I/O operation canceled',
+        'socketHangUp':'socket hang up',
+        'connectionReset':'ECONNRESET',
+        'sqliteBusy':'SQLITE_BUSY',
+        'sqliteError':'SQLITE_ERROR',
+        'd1Error':'D1_ERROR',
+    }
+    state=container.get('State',{})
+    restarts=container.get('RestartCount')
+    return {'status':'observed','source':'bounded-central-runtime-logs','window':'2h','tailLimit':200,
+        'running':state.get('Running') is True,'oomKilled':state.get('OOMKilled') is True,
+        'errorPresent':bool(state.get('Error')),
+        'restartCount':restarts if type(restarts) is int and restarts>=0 else None,
+        'linesRead':len(lines),
+        'signals':{key:sum(pattern.lower() in line.lower() for line in lines) for key,pattern in patterns.items()}}
+
+def runtime_failure_diagnostics(container, container_id):
+    require(re.fullmatch(r'[a-f0-9]{64}',container_id),'CENTRAL_CONTAINER_ID')
+    try:
+        result=subprocess.run(['docker','logs','--since','2h','--tail','200',container_id],capture_output=True,timeout=30)
+    except subprocess.TimeoutExpired:
+        return {'status':'blocked','reason':'RUNTIME_LOG_READ_UNCONFIRMED'}
+    if result.returncode!=0:
+        return {'status':'blocked','reason':'RUNTIME_LOG_READ_UNCONFIRMED'}
+    return summarize_runtime_failure(container,result.stdout+b'\n'+result.stderr)
 
 def capture(command, prefix, *, data=None, timeout=600):
     result=subprocess.run(command,input=data,capture_output=True,timeout=timeout)
@@ -104,6 +143,8 @@ def main():
     central_source=image['Config']['Labels'].get('org.opencontainers.image.revision')
     verify_central_source(central_source,source)
     report={'controllerSha':source,'centralSource':central_source,'businessDataChanged':False}
+    report['runtimeDiagnostics']=runtime_failure_diagnostics(container,container['Id'])
+    print('ALFA_RUNTIME_DIAGNOSTICS='+json.dumps(report['runtimeDiagnostics']),flush=True)
     report['bank']=capture(['docker','exec','-i',name,'node','--input-type=module','-'],'BANK_DATA_AUDIT=',data=(ROOT/'deploy/bank-data-audit.mjs').read_bytes())
     print('BANK_RECONCILIATION='+json.dumps(report['bank'],ensure_ascii=False),flush=True)
     report['source']=capture(['docker','exec','-i',name,'node','--input-type=module','-'],'ALFA_SOURCE_AUDIT=',data=(ROOT/'.github/scripts/alfa-source-audit.mjs').read_bytes())

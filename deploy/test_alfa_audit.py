@@ -84,4 +84,32 @@ class StoppedInventoryTests(unittest.TestCase):
         self.assertTrue(stopped['dataVolumePresent'])
         self.assertNotIn('private-',text)
 
+class RuntimeFailureTests(unittest.TestCase):
+    def test_runtime_summary_counts_only_fixed_signals(self):
+        container={'State':{'Running':True,'OOMKilled':False,'Error':'PRIVATE'},'RestartCount':2,'Config':{'Env':['PRIVATE']}}
+        lines=b'PRIVATE token\nError: Cannot perform I/O on behalf of a different request. PRIVATE\nalfacrm.staged_action_failed\nPRIVATE fetch failed\n'
+        result=audit.summarize_runtime_failure(container,lines)
+        self.assertEqual(result['restartCount'],2)
+        self.assertEqual(result['signals']['crossRequestIo'],1)
+        self.assertEqual(result['signals']['alfaActionFailed'],1)
+        self.assertEqual(result['signals']['fetchFailed'],1)
+        self.assertNotIn('PRIVATE',json.dumps(result))
+        self.assertEqual(result['linesRead'],4)
+
+    def test_runtime_log_failure_is_not_an_empty_success(self):
+        container={'State':{'Running':True},'RestartCount':0}
+        with patch.object(audit.subprocess,'run',return_value=subprocess.CompletedProcess([],1,b'PRIVATE',b'PRIVATE')):
+            result=audit.runtime_failure_diagnostics(container,'a'*64)
+        self.assertEqual(result['status'],'blocked')
+        self.assertEqual(result['reason'],'RUNTIME_LOG_READ_UNCONFIRMED')
+        self.assertNotIn('PRIVATE',json.dumps(result))
+
+    def test_runtime_read_has_fixed_bounded_scope(self):
+        container={'State':{'Running':True,'OOMKilled':False},'RestartCount':0}
+        with patch.object(audit.subprocess,'run',return_value=subprocess.CompletedProcess([],0,b'',b'')) as run:
+            result=audit.runtime_failure_diagnostics(container,'a'*64)
+        self.assertEqual(result['status'],'observed')
+        self.assertEqual(run.call_args.args[0],['docker','logs','--since','2h','--tail','200','a'*64])
+        self.assertEqual(run.call_args.kwargs['timeout'],30)
+
 if __name__=='__main__':unittest.main()
