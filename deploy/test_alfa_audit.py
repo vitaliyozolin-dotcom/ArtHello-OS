@@ -119,4 +119,43 @@ class RuntimeFailureTests(unittest.TestCase):
         self.assertEqual(run.call_args.args[0],['docker','logs','--since','2h','--tail','200','a'*64])
         self.assertEqual(run.call_args.kwargs['timeout'],30)
 
+
+class GatewayFailureTests(unittest.TestCase):
+    def test_gateway_summary_counts_fixed_signals_without_private_values(self):
+        rows=[
+            {'level':'error','logger':'http.log.error','status':502,'msg':'dial tcp PRIVATE: connect: connection refused','request':{'host':'arthello-188-225-38-55.sslip.io','uri':'/api/integrations/alfacrm','headers':{'Cookie':['PRIVATE']}}},
+            {'level':'error','status':502,'msg':'PRIVATE unexpected EOF','request':{'host':'arthello-188-225-38-55.sslip.io','uri':'/api/integrations/alfacrm?PRIVATE'}},
+            {'level':'error','status':504,'msg':'PRIVATE i/o timeout','request':{'host':'unrelated.test','uri':'/api/integrations/alfacrm'}},
+        ]
+        report=audit.summarize_gateway_failure(('\n'.join(json.dumps(row) for row in rows)+'\nPRIVATE not JSON').encode())
+        self.assertEqual(report['linesRead'],4)
+        self.assertEqual(report['centralErrors'],2)
+        self.assertEqual(report['alfaErrors'],2)
+        self.assertEqual(report['signals']['connectionRefused'],1)
+        self.assertEqual(report['signals']['unexpectedEof'],1)
+        self.assertEqual(report['signals']['ioTimeout'],0)
+        self.assertEqual(report['statuses']['502'],2)
+        self.assertNotIn('PRIVATE',json.dumps(report))
+
+    def test_gateway_requires_unique_pinned_image_container(self):
+        for raw in (b'',b'a'*64+b'\n'+b'b'*64,b'bad-id'):
+            with patch.object(audit.subprocess,'run',return_value=subprocess.CompletedProcess([],0,raw,b'')) as run:
+                self.assertEqual(audit.gateway_failure_diagnostics()['status'],'blocked')
+                self.assertEqual(run.call_count,1)
+
+    def test_gateway_log_read_is_bounded_and_read_only(self):
+        def run(command,**kwargs):
+            if command[:2]==['docker','ps']:return subprocess.CompletedProcess(command,0,b'a'*64+b'\n',b'')
+            self.assertEqual(command,['docker','logs','--since','2h','--tail','200','a'*64])
+            self.assertEqual(kwargs['timeout'],30)
+            return subprocess.CompletedProcess(command,0,b'',b'')
+        with patch.object(audit.subprocess,'run',side_effect=run):
+            self.assertEqual(audit.gateway_failure_diagnostics()['status'],'observed')
+
+    def test_gateway_failure_does_not_publish_command_error(self):
+        with patch.object(audit.subprocess,'run',return_value=subprocess.CompletedProcess([],1,b'PRIVATE',b'PRIVATE')):
+            report=audit.gateway_failure_diagnostics()
+        self.assertEqual(report['status'],'blocked')
+        self.assertNotIn('PRIVATE',json.dumps(report))
+
 if __name__=='__main__':unittest.main()

@@ -12,7 +12,8 @@ ROOT=Path(__file__).resolve().parents[1]
 # Previously accepted School key; D065/R17 protected School transport.
 SCHOOL_HOST_PIN='SHA256:/kBNohTF+5g8U+jQt+PzOCoWZ9yCSFjBnEP3Oc3MwRI'
 # Exact central source from successful protected release 36269374177.
-AUDIT_CENTRAL_LIVE=('5320821c5780fc3e52147ff230c5799dd555b3e2',
+AUDIT_CENTRAL_LIVE=('d39fb05d6dc27dfba29fd65adf2ff41e5b9d1a2a',
+                    '5320821c5780fc3e52147ff230c5799dd555b3e2',
                     '0210d4c7dabe5376d892c7058ffab74b36185a64',
                     'cc8cff9c2a396a97aeb6daf8dc0907a72f5587fa',
                     '49cea8d5f69d356e16c6aa88ecc8a7e93cef417d',
@@ -78,6 +79,57 @@ def runtime_failure_diagnostics(container, container_id):
         return {'status':'blocked','reason':'RUNTIME_LOG_READ_UNCONFIRMED'}
     separator=b'\n' if result.stdout and result.stderr and not result.stdout.endswith(b'\n') else b''
     return summarize_runtime_failure(container,result.stdout+separator+result.stderr)
+
+
+# Observed by protected read-only capacity run 36410336697; no mutable tag.
+GATEWAY_IMAGE='sha256:4c6e91c6ed0e2fa03efd5b44747b625fec79bc9cd06ac5235a779726618e530d'
+
+def summarize_gateway_failure(raw):
+    patterns={'connectionRefused':'connection refused','connectionReset':'connection reset',
+        'unexpectedEof':'unexpected eof','ioTimeout':'i/o timeout',
+        'deadlineExceeded':'deadline exceeded','noSuchHost':'no such host',
+        'tlsHandshake':'tls handshake','contextCanceled':'context canceled',
+        'upstreamClosed':'upstream prematurely closed'}
+    lines=raw.decode('utf-8',errors='replace').splitlines()
+    report={'status':'observed','source':'bounded-pinned-gateway-logs','window':'2h','tailLimit':200,
+        'linesRead':len(lines),'jsonLines':0,'centralErrors':0,'alfaErrors':0,
+        'statuses':{str(code):0 for code in (500,502,503,504)},
+        'signals':{key:0 for key in patterns},'unclassifiedErrors':0}
+    for line in lines:
+        try: row=json.loads(line)
+        except (ValueError,TypeError): continue
+        if not isinstance(row,dict):continue
+        report['jsonLines']+=1
+        request=row.get('request')
+        if not isinstance(request,dict):continue
+        if request.get('host') not in ('arthello-188-225-38-55.sslip.io','arthello-origin.internal'):continue
+        status=row.get('status')
+        if row.get('level')!='error' and not (type(status) is int and 500<=status<=599):continue
+        report['centralErrors']+=1
+        uri=request.get('uri')
+        if isinstance(uri,str) and uri.split('?',1)[0]=='/api/integrations/alfacrm':report['alfaErrors']+=1
+        if type(status) is int and str(status) in report['statuses']:report['statuses'][str(status)]+=1
+        message=row.get('msg','')
+        message=message.lower() if isinstance(message,str) else ''
+        matched=False
+        for key,pattern in patterns.items():
+            if pattern in message:report['signals'][key]+=1;matched=True
+        if not matched:report['unclassifiedErrors']+=1
+    return report
+
+def gateway_failure_diagnostics():
+    blocked={'status':'blocked','reason':'GATEWAY_LOG_READ_UNCONFIRMED'}
+    try:
+        found=subprocess.run(['docker','ps','--no-trunc','--filter','ancestor='+GATEWAY_IMAGE,
+            '--format','{{.ID}}'],capture_output=True,timeout=30)
+        ids=found.stdout.decode('ascii',errors='replace').split()
+        if found.returncode!=0 or len(ids)!=1 or not re.fullmatch(r'[a-f0-9]{64}',ids[0]):
+            return {'status':'blocked','reason':'GATEWAY_IDENTITY_UNCONFIRMED'}
+        result=subprocess.run(['docker','logs','--since','2h','--tail','200',ids[0]],capture_output=True,timeout=30)
+        if result.returncode!=0:return blocked
+        separator=b'\n' if result.stdout and result.stderr and not result.stdout.endswith(b'\n') else b''
+        return summarize_gateway_failure(result.stdout+separator+result.stderr)
+    except (subprocess.TimeoutExpired,OSError):return blocked
 
 def capture(command, prefix, *, data=None, timeout=600):
     result=subprocess.run(command,input=data,capture_output=True,timeout=timeout)
@@ -159,6 +211,8 @@ def main():
     report={'controllerSha':source,'centralSource':central_source,'businessDataChanged':False}
     report['runtimeDiagnostics']=runtime_failure_diagnostics(container,container['Id'])
     print('ALFA_RUNTIME_DIAGNOSTICS='+json.dumps(report['runtimeDiagnostics']),flush=True)
+    report['gatewayDiagnostics']=gateway_failure_diagnostics()
+    print('ALFA_GATEWAY_DIAGNOSTICS='+json.dumps(report['gatewayDiagnostics']),flush=True)
     report['bank']=capture(['docker','exec','-i',name,'node','--input-type=module','-'],'BANK_DATA_AUDIT=',data=(ROOT/'deploy/bank-data-audit.mjs').read_bytes())
     print('BANK_RECONCILIATION='+json.dumps(report['bank'],ensure_ascii=False),flush=True)
     report['source']=capture(['docker','exec','-i',name,'node','--input-type=module','-'],'ALFA_SOURCE_AUDIT=',data=(ROOT/'.github/scripts/alfa-source-audit.mjs').read_bytes())
