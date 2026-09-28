@@ -32,6 +32,15 @@ def summarize_runtime_failure(container, raw):
     lines=raw.decode('utf-8',errors='replace').splitlines()
     patterns={
         'crossRequestIo':'Cannot perform I/O on behalf of a different request',
+        'transportFailure':'ALFA_TRANSPORT_FAILURE=',
+        'transportCrossRequestIo':'CROSS_REQUEST_IO',
+        'transportUnclassified':'"reason":"UNCLASSIFIED"',
+        'transportTimeout':'"reason":"TIMEOUT"',
+        'transportCallerAbort':'"reason":"CALLER_ABORT"',
+        'transportResponseTooLarge':'"reason":"RESPONSE_TOO_LARGE"',
+        'transportTlsExpired':'CERT_HAS_EXPIRED',
+        'transportDnsNotFound':'ENOTFOUND',
+        'transportSocket':'UND_ERR_SOCKET',
         'alfaActionFailed':'alfacrm.staged_action_failed',
         'fetchFailed':'fetch failed',
         'uncaughtException':'Uncaught',
@@ -46,6 +55,10 @@ def summarize_runtime_failure(container, raw):
         'sqliteError':'SQLITE_ERROR',
         'd1Error':'D1_ERROR',
     }
+    for reason in ('ECONNRESET','ECONNREFUSED','ETIMEDOUT','ENOTFOUND','EAI_AGAIN',
+        'UND_ERR_CONNECT_TIMEOUT','UND_ERR_HEADERS_TIMEOUT','UND_ERR_BODY_TIMEOUT','UND_ERR_SOCKET',
+        'CERT_HAS_EXPIRED','DEPTH_ZERO_SELF_SIGNED_CERT','UNABLE_TO_VERIFY_LEAF_SIGNATURE','ERR_TLS_CERT_ALTNAME_INVALID'):
+        patterns['transport_'+reason]='"reason":"'+reason+'"'
     state=container.get('State',{})
     restarts=container.get('RestartCount')
     return {'status':'observed','source':'bounded-central-runtime-logs','window':'2h','tailLimit':200,
@@ -63,7 +76,7 @@ def runtime_failure_diagnostics(container, container_id):
         return {'status':'blocked','reason':'RUNTIME_LOG_READ_UNCONFIRMED'}
     if result.returncode!=0:
         return {'status':'blocked','reason':'RUNTIME_LOG_READ_UNCONFIRMED'}
-    return summarize_runtime_failure(container,result.stdout+b'\n'+result.stderr)
+    return summarize_runtime_failure(container,b'\n'.join(part.rstrip(b'\n') for part in (result.stdout,result.stderr) if part))
 
 def capture(command, prefix, *, data=None, timeout=600):
     result=subprocess.run(command,input=data,capture_output=True,timeout=timeout)

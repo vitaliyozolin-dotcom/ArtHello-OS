@@ -263,3 +263,31 @@ test('source status dictionary is available through the real production transpor
   assert.equal(response.status,200);
   assert.equal((await response.json()).items[0].name,'Активен');
 });
+
+
+test('transport preserves only fixed failure reasons before returning sanitized responses', async()=>{
+  for(const [error,reason] of [
+    [Object.assign(new Error('PRIVATE'),{cause:{code:'ECONNRESET',detail:'PRIVATE'}}),'ECONNRESET'],
+    [new Error('Cannot perform I/O on behalf of a different request. PRIVATE'),'CROSS_REQUEST_IO'],
+    [Object.assign(new Error('PRIVATE'),{cause:{code:'PRIVATE'}}),'UNCLASSIFIED'],
+  ]) {
+    const reports=[];
+    const transport=createAlfaCrmTransport({fetchImpl:async()=>{throw error;},onFailure:report=>reports.push(report)});
+    const response=await transport(request('https://tenant.s20.online/v2api/6/teacher/index',{headers:{'x-alfacrm-token':'synthetic-session-token'},body:{removed:0}}));
+    assert.equal(response.status,502);
+    assert.deepEqual(reports,[{operation:'teacher',phase:'fetch',reason}]);
+    assert.doesNotMatch(JSON.stringify(reports),/PRIVATE|tenant|token|session/);
+  }
+});
+
+test('transport identifies bounded response and body stream failures without logging source bytes',async()=>{
+  for(const [response,reason] of [
+    [new Response('PRIVATE',{headers:{'content-length':'6000001'}}),'RESPONSE_TOO_LARGE'],
+    [new Response(new ReadableStream({start(c){c.error(Object.assign(new Error('PRIVATE'),{code:'ECONNRESET'}));}})),'ECONNRESET'],
+  ]) {
+    const reports=[];
+    const transport=createAlfaCrmTransport({fetchImpl:async()=>response,onFailure:r=>reports.push(r)});
+    assert.equal((await transport(request())).status,502);
+    assert.deepEqual(reports,[{operation:'login',phase:'response_body',reason}]);
+  }
+});

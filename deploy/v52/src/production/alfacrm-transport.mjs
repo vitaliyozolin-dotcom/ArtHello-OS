@@ -9,7 +9,8 @@ const INDEX_PATH = /^\/v2api\/(?:branch\/index|[A-Za-z0-9._-]{1,80}\/(?:customer
  * function to the worker as a Miniflare service binding, so DNS/TLS use the
  * same bounded Node trust path as the other protected integrations.
  */
-export function createAlfaCrmTransport({ fetchImpl = globalThis.fetch, timeoutMs = UPSTREAM_TIMEOUT_MS } = {}) {
+export function createAlfaCrmTransport({ fetchImpl = globalThis.fetch, timeoutMs = UPSTREAM_TIMEOUT_MS, onFailure = report => console.error("ALFA_TRANSPORT_FAILURE=" + JSON.stringify(report)) } = {}) {
+  if (typeof onFailure !== "function") throw new TypeError("onFailure must be a function");
   if (typeof fetchImpl !== "function") throw new TypeError("fetchImpl must be a function");
   if (!Number.isInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > UPSTREAM_TIMEOUT_MS) {
     throw new TypeError("timeoutMs must be a positive integer within the production timeout");
@@ -53,6 +54,11 @@ export function createAlfaCrmTransport({ fetchImpl = globalThis.fetch, timeoutMs
     const abortFromCaller = () => controller.abort();
     request.signal?.addEventListener("abort", abortFromCaller, { once: true });
 
+    let phase = "fetch";
+    const emitFailure = reason => {
+      const operation = target.kind === "login" ? "login" : new URL(target.url).pathname.split("/").at(-2);
+      try { onFailure({ operation, phase, reason }); } catch { /* Diagnostics cannot alter transport behavior. */ }
+    };
     try {
       if (request.signal?.aborted) controller.abort();
       const upstream = await fetchImpl(target.url, {
@@ -63,8 +69,12 @@ export function createAlfaCrmTransport({ fetchImpl = globalThis.fetch, timeoutMs
         redirect: "manual",
         signal: controller.signal,
       });
+      phase = "response_body";
       const responseBody = await readBoundedResponseBody(upstream);
-      if (responseBody === null) return errorResponse(502, "upstream_response_too_large", "unavailable");
+      if (responseBody === null) {
+        emitFailure("RESPONSE_TOO_LARGE");
+        return errorResponse(502, "upstream_response_too_large", "unavailable");
+      }
       const responseHeaders = new Headers({ "cache-control": "no-store" });
       const responseType = upstream.headers.get("content-type");
       if (responseType) responseHeaders.set("content-type", responseType);
@@ -73,14 +83,22 @@ export function createAlfaCrmTransport({ fetchImpl = globalThis.fetch, timeoutMs
         statusText: upstream.statusText,
         headers: responseHeaders,
       });
-    } catch {
+    } catch (error) {
       const timeoutFailure = timedOut || request.signal?.aborted;
+      emitFailure(timedOut ? "TIMEOUT" : request.signal?.aborted ? "CALLER_ABORT" : failureReason(error));
       return errorResponse(timeoutFailure ? 504 : 502, timeoutFailure ? "upstream_timeout" : "upstream_unavailable", timeoutFailure ? "timeout" : "unavailable");
     } finally {
       clearTimeout(timeout);
       request.signal?.removeEventListener("abort", abortFromCaller);
     }
   };
+}
+
+function failureReason(error) {
+  if (typeof error?.message === "string" && error.message.includes("Cannot perform I/O on behalf of a different request")) return "CROSS_REQUEST_IO";
+  const allowed = new Set(["ECONNRESET", "ECONNREFUSED", "ETIMEDOUT", "ENOTFOUND", "EAI_AGAIN", "UND_ERR_CONNECT_TIMEOUT", "UND_ERR_HEADERS_TIMEOUT", "UND_ERR_BODY_TIMEOUT", "UND_ERR_SOCKET", "CERT_HAS_EXPIRED", "DEPTH_ZERO_SELF_SIGNED_CERT", "UNABLE_TO_VERIFY_LEAF_SIGNATURE", "ERR_TLS_CERT_ALTNAME_INVALID"]);
+  for (const code of [error?.code, error?.cause?.code]) if (allowed.has(code)) return code;
+  return "UNCLASSIFIED";
 }
 
 function classifyTarget(input, method) {

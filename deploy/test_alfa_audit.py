@@ -109,6 +109,7 @@ class RuntimeFailureTests(unittest.TestCase):
         with patch.object(audit.subprocess,'run',return_value=subprocess.CompletedProcess([],0,b'',b'')) as run:
             result=audit.runtime_failure_diagnostics(container,'a'*64)
         self.assertEqual(result['status'],'observed')
+        self.assertEqual(result['linesRead'],0)
         self.assertEqual(run.call_args.args[0],['docker','logs','--since','2h','--tail','200','a'*64])
         self.assertEqual(run.call_args.kwargs['timeout'],30)
 

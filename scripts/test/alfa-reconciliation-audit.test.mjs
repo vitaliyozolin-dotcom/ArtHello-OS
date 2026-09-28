@@ -56,3 +56,17 @@ test('staff audit reads stored evidence with autosync enabled without creating a
  assert.equal(result.connector.autosyncEnabled,true);
  assert.doesNotMatch(JSON.stringify(result),/private/);
 });
+
+
+test('HTTP diagnostics distinguish known application failures from non-JSON and unknown responses',async()=>{
+ const {classifyAlfaResponseFailure}=await import('../../deploy/alfa_reconciliation_audit.mjs');
+ for(const [body,code] of [
+  ['<html>PRIVATE bad gateway</html>','HTTP_502_NON_JSON'],
+  [JSON.stringify({error:'PRIVATE'}),'HTTP_502_UNKNOWN_ERROR'],
+  [JSON.stringify({message:'PRIVATE'}),'HTTP_502_UNKNOWN_JSON'],
+  [JSON.stringify({error:'AlfaCRM не выполнила чтение данных (429).'}),'ALFA_UPSTREAM_HTTP_429'],
+  ['PRIVATE'.repeat(3000),'HTTP_502_BODY_TOO_LARGE'],
+ ]) assert.equal(await classifyAlfaResponseFailure(new Response(body,{status:502})),code);
+ const broken=new Response(new ReadableStream({start(c){c.error(Error('PRIVATE'));}}),{status:502});
+ assert.equal(await classifyAlfaResponseFailure(broken),'HTTP_502_BODY_UNREADABLE');
+});
