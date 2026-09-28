@@ -1,4 +1,6 @@
 """Protected, non-mutating source/reconciliation inventory. No client rows in logs."""
+import hashlib
+import math
 import importlib.util
 import json
 import os
@@ -89,12 +91,15 @@ def summarize_gateway_failure(raw):
         'unexpectedEof':'unexpected eof','ioTimeout':'i/o timeout',
         'deadlineExceeded':'deadline exceeded','noSuchHost':'no such host',
         'tlsHandshake':'tls handshake','contextCanceled':'context canceled',
-        'upstreamClosed':'upstream prematurely closed'}
+        'upstreamClosed':'upstream prematurely closed','eof':'eof',
+        'closedBody':'invalid read on closed body','malformedResponse':'malformed http',
+        'connectionClosed':'connection closed','headerTooLarge':'header too large'}
     lines=raw.decode('utf-8',errors='replace').splitlines()
     report={'status':'observed','source':'bounded-pinned-gateway-logs','window':'2h','tailLimit':200,
         'linesRead':len(lines),'jsonLines':0,'centralErrors':0,'alfaErrors':0,
         'statuses':{str(code):0 for code in (500,502,503,504)},
         'signals':{key:0 for key in patterns},'unclassifiedErrors':0}
+    report['alfa']={'signals':{key:0 for key in patterns},'statuses':{str(code):0 for code in (500,502,503,504)},'recent':[]}
     for line in lines:
         try: row=json.loads(line)
         except (ValueError,TypeError): continue
@@ -107,7 +112,8 @@ def summarize_gateway_failure(raw):
         if row.get('level')!='error' and not (type(status) is int and 500<=status<=599):continue
         report['centralErrors']+=1
         uri=request.get('uri')
-        if isinstance(uri,str) and uri.split('?',1)[0]=='/api/integrations/alfacrm':report['alfaErrors']+=1
+        is_alfa=isinstance(uri,str) and uri.split('?',1)[0]=='/api/integrations/alfacrm'
+        if is_alfa:report['alfaErrors']+=1
         if type(status) is int and str(status) in report['statuses']:report['statuses'][str(status)]+=1
         message=row.get('msg','')
         message=message.lower() if isinstance(message,str) else ''
@@ -115,6 +121,18 @@ def summarize_gateway_failure(raw):
         for key,pattern in patterns.items():
             if pattern in message:report['signals'][key]+=1;matched=True
         if not matched:report['unclassifiedErrors']+=1
+        if is_alfa:
+            reasons=[key for key,pattern in patterns.items() if pattern in message]
+            for key in reasons:report['alfa']['signals'][key]+=1
+            if type(status) is int and str(status) in report['alfa']['statuses']:report['alfa']['statuses'][str(status)]+=1
+            duration=row.get('duration');timestamp=row.get('ts')
+            report['alfa']['recent'].append({
+                'status':status if type(status) is int and 500<=status<=599 else None,
+                'method':request.get('method') if request.get('method') in ('GET','POST','PUT','PATCH','DELETE','HEAD','OPTIONS') else 'unknown',
+                'timestamp':timestamp if type(timestamp) in (int,float) and math.isfinite(timestamp) and 0<timestamp<4102444800 else None,
+                'durationMs':round(duration*1000) if type(duration) in (int,float) and math.isfinite(duration) and 0<=duration<=3600 else None,
+                'reasons':reasons or ['unclassified']})
+            report['alfa']['recent']=report['alfa']['recent'][-8:]
     return report
 
 def gateway_failure_diagnostics():
@@ -130,6 +148,70 @@ def gateway_failure_diagnostics():
         separator=b'\n' if result.stdout and result.stderr and not result.stdout.endswith(b'\n') else b''
         return summarize_gateway_failure(result.stdout+separator+result.stderr)
     except (subprocess.TimeoutExpired,OSError):return blocked
+
+
+def summarize_gateway_config(config):
+    hosts={'arthello-188-225-38-55.sslip.io','arthello-origin.internal'}
+    proxies=[]
+    def duration(value,default):
+        if value is None or value==0:return default
+        if type(value) is int and 0<value<=3600_000_000_000:return value
+        if isinstance(value,str):
+            parsed=re.fullmatch(r'([0-9]+)(ns|us|ms|s|m|h)',value)
+            if parsed:
+                n=int(parsed[1])*{'ns':1,'us':1000,'ms':1000000,'s':1000000000,'m':60000000000,'h':3600000000000}[parsed[2]]
+                if 0<n<=3600_000_000_000:return n
+        return None
+    def walk(value,scope=frozenset(),depth=0):
+        require(depth<=40,'GATEWAY_CONFIG_DEPTH')
+        if isinstance(value,list):
+            for row in value:walk(row,scope,depth+1)
+        elif isinstance(value,dict):
+            if isinstance(value.get('match'),list):
+                selected=[h for match in value['match'] if isinstance(match,dict) for h in match.get('host',[]) if isinstance(h,str)]
+                if selected:
+                    if any(not isinstance(match,dict) or not match.get('host') for match in value['match']):selected.append('*')
+                    scope=frozenset(selected)
+            if value.get('handler')=='reverse_proxy' and scope & hosts:
+                transport=value.get('transport') or {}
+                require(isinstance(transport,dict),'GATEWAY_TRANSPORT_FORMAT')
+                keep=transport.get('keep_alive') or {}
+                require(isinstance(keep,dict),'GATEWAY_KEEPALIVE_FORMAT')
+                upstreams=value.get('upstreams') or []
+                require(isinstance(upstreams,list),'GATEWAY_UPSTREAM_FORMAT')
+                enabled=keep.get('enabled',True)
+                proxies.append({
+                    'exclusiveCentralHostScope':scope<=hosts,
+                    'publicHost': 'arthello-188-225-38-55.sslip.io' in scope,
+                    'originHost':'arthello-origin.internal' in scope,
+                    'upstreams':len(upstreams),
+                    'exactCentralUpstream':len(upstreams)==1 and isinstance(upstreams[0],dict) and upstreams[0].get('dial')=='arthello-direct-34837407187-1:8081',
+                    'httpTransport':transport.get('protocol','http')=='http',
+                    'tlsConfigured':'tls' in transport,
+                    'keepAliveEnabled':enabled if type(enabled) is bool else None,
+                    'keepAliveSource':'configured' if 'keep_alive' in transport else 'caddy-default',
+                    'idleTimeoutNs':duration(keep.get('idle_timeout'),120000000000),
+                    'versions':[v for v in transport.get('versions',[]) if v in ('1.1','2','h2c','3')]})
+            for key,child in value.items():
+                if key!='match' and isinstance(child,(list,dict)):walk(child,scope,depth+1)
+    require(isinstance(config,dict),'GATEWAY_CONFIG_FORMAT')
+    walk(config.get('apps',{}).get('http',{}).get('servers',{}))
+    return {'status':'observed','centralProxies':proxies,
+        'configSha256':hashlib.sha256(json.dumps(config,sort_keys=True,separators=(',',':')).encode()).hexdigest()}
+
+def gateway_config_diagnostics():
+    try:
+        found=subprocess.run(['docker','ps','--no-trunc','--filter','ancestor='+GATEWAY_IMAGE,
+            '--format','{{.ID}}'],capture_output=True,timeout=30)
+        ids=found.stdout.decode('ascii',errors='replace').split()
+        if found.returncode!=0 or len(ids)!=1 or not re.fullmatch(r'[a-f0-9]{64}',ids[0]):
+            return {'status':'blocked','reason':'GATEWAY_IDENTITY_UNCONFIRMED'}
+        result=subprocess.run(['docker','exec',ids[0],'wget','-qO-','http://127.0.0.1:2019/config/'],capture_output=True,timeout=30)
+        if result.returncode!=0 or len(result.stdout)>2_000_000:
+            return {'status':'blocked','reason':'GATEWAY_CONFIG_READ_UNCONFIRMED'}
+        return summarize_gateway_config(json.loads(result.stdout))
+    except Exception:
+        return {'status':'blocked','reason':'GATEWAY_CONFIG_UNCONFIRMED'}
 
 def capture(command, prefix, *, data=None, timeout=600):
     result=subprocess.run(command,input=data,capture_output=True,timeout=timeout)
@@ -213,6 +295,8 @@ def main():
     print('ALFA_RUNTIME_DIAGNOSTICS='+json.dumps(report['runtimeDiagnostics']),flush=True)
     report['gatewayDiagnostics']=gateway_failure_diagnostics()
     print('ALFA_GATEWAY_DIAGNOSTICS='+json.dumps(report['gatewayDiagnostics']),flush=True)
+    report['gatewayConfig']=gateway_config_diagnostics()
+    print('ALFA_GATEWAY_CONFIG='+json.dumps(report['gatewayConfig']),flush=True)
     report['bank']=capture(['docker','exec','-i',name,'node','--input-type=module','-'],'BANK_DATA_AUDIT=',data=(ROOT/'deploy/bank-data-audit.mjs').read_bytes())
     print('BANK_RECONCILIATION='+json.dumps(report['bank'],ensure_ascii=False),flush=True)
     report['source']=capture(['docker','exec','-i',name,'node','--input-type=module','-'],'ALFA_SOURCE_AUDIT=',data=(ROOT/'.github/scripts/alfa-source-audit.mjs').read_bytes())
