@@ -59,6 +59,11 @@ export async function synchronize(client, progress = () => {}) {
       for(let portion=0;portion<=preview.count;portion++) {
         progress({stage:'module-import', module});
         const applied = await call({action:'importModule', ...params, previewToken:preview.previewToken});
+        if(applied.rejected!==0 || applied.projectionBlocked===true) {
+          const count=value=>Number.isSafeInteger(value)&&value>=0?value:null;
+          progress({stage:'module-unconfirmed',module,accepted:count(applied.accepted),rejected:count(applied.rejected),projectionBlocked:applied.projectionBlocked===true,
+            ...(module==='lessons'?{lessonRejectionReasons:Object.fromEntries(['missingGroup','missingDate','unknownGroup'].map(key=>[key,count(applied.lessonRejectionReasons?.[key])]))}:{})});
+        }
         requireValue(applied.rejected===0 && applied.projectionBlocked!==true && Number.isSafeInteger(applied.accepted) && applied.accepted>=0 && typeof applied.complete==='boolean', 'MODULE_IMPORT_UNCONFIRMED');
         accepted+=applied.accepted;
         requireValue(accepted<=preview.count,'MODULE_COUNT_DRIFT');

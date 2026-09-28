@@ -1629,7 +1629,9 @@ async function canonicalizeLessons(rows: FetchedRecord[], state: AlfaState, acto
     const teacherIds = readIds(item.teacher_ids, item.teacher_id ?? record(item.teacher)?.id);
     const date = isoDate(item.date ?? item.lesson_date);
     const localBranchId = state.branchMappings[remoteBranchId] ?? "";
-    if (!lessonId || !localBranchId || (!remoteGroupIds.length && !customerIds?.length)) {
+    // A source lesson can legitimately have no current roster. Retain its
+    // fact and explicit empty/unknown links; never invent a group or student.
+    if (!lessonId || !localBranchId) {
       rejected += 1; rejectionReasons.missingGroup += 1; continue;
     }
     if (!date || !Number.isFinite(Date.parse(`${date}T00:00:00Z`)) || new Date(`${date}T00:00:00Z`).toISOString().slice(0,10)!==date) { rejected += 1; rejectionReasons.missingDate += 1; continue; }

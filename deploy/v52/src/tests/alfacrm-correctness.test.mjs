@@ -1141,7 +1141,7 @@ test('lesson rejection reports bounded aggregate reasons without source details'
  const {state}=await setup(t);
  const result=await route.canonicalizeLessons([
   {remoteBranchId:'1',item:{id:2,group_id:5}},
-  {remoteBranchId:'1',item:{id:3,date:'2026-09-01'}},
+  {remoteBranchId:'1',item:{date:'2026-09-01'}},
  ],state,'TEST');
  assert.deepEqual(result,{accepted:0,rejected:2,rejectionReasons:{missingGroup:1,missingDate:1,unknownGroup:0},unresolvedGroupLinks:0});
  assert.doesNotMatch(JSON.stringify(result),/2026-09-01|"id"/);
@@ -1388,4 +1388,22 @@ test('dated lesson times reject conflicting dates, invalid clocks and unconfirme
   await assert.rejects(route.canonicalizeLessons([{remoteBranchId:'1',item:{id:250,date:'2026-09-01',customer_ids:[10],time_from}}],state,'TEST'),/время занятия|дату занятия/);
  }
  assert.equal(sql.prepare('SELECT count(*) n FROM alfacrm_lesson_facts').get().n,0);
+});
+
+
+test('unassigned source lessons remain facts without invented roster or group views',async t=>{
+ const {sql,state}=await setup(t);
+ sql.exec("INSERT INTO alfacrm_import_batches(id,module,scope,status,created_at) VALUES('UNASSIGNED','lessons','{}','projecting','2026-09-01')");
+ const rows=[{remoteBranchId:'1',item:{id:300,date:'2026-09-01',group_ids:[],customer_ids:[],teacher_ids:[],time_from:'2026-09-01 10:00:00',status:2}},
+  {remoteBranchId:'1',item:{id:301,date:'2026-09-01',status:1}}];
+ await route.upsertRawRecords('lessons',rows,'UNASSIGNED');
+ const result=await route.canonicalizeLessons(rows,state,'TEST');
+ assert.equal(result.accepted,2);assert.equal(result.rejected,0);
+ const facts=sql.prepare('SELECT source_lesson_id,customer_ids,teacher_ids,source_status FROM alfacrm_lesson_facts ORDER BY source_lesson_id').all();
+ assert.equal(facts.length,2);assert.equal(facts[0].customer_ids,'[]');assert.equal(facts[0].teacher_ids,'[]');assert.equal(facts[0].source_status,'2');
+ assert.equal(facts[1].customer_ids,null);assert.equal(facts[1].teacher_ids,null);
+ assert.equal(sql.prepare('SELECT count(*) n FROM education_lessons').get().n,0);
+ await route.canonicalizeLessons(rows,state,'TEST');
+ assert.equal(sql.prepare('SELECT count(*) n FROM alfacrm_lesson_facts').get().n,2);
+ assert.equal(sql.prepare('SELECT count(*) n FROM alfacrm_projection_lineage').get().n,2);
 });

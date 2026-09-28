@@ -127,3 +127,12 @@ test('restore requests saved autosync state, not a fresh schedule', async()=>{
  await synchronize(client);
  assert.equal(client.calls.find(c=>c.action==='setAutosync'&&c.enabled===true).resume,true);
 });
+
+
+test('partial lesson failure reports bounded counts without source payload',async()=>{
+ const client=fixture((body,result)=>{if(body.action==='importModule' && body.module==='lessons')Object.assign(result,{accepted:8,rejected:2,lessonRejectionReasons:{missingGroup:2,missingDate:0,unknownGroup:0,private:'PRIVATE'},error:'PRIVATE'});});
+ const progress=[];await assert.rejects(()=>synchronize(client,p=>progress.push(p)),/MODULE_IMPORT_UNCONFIRMED/);
+ const failure=progress.find(p=>p.stage==='module-unconfirmed');
+ assert.deepEqual(failure,{stage:'module-unconfirmed',module:'lessons',accepted:8,rejected:2,projectionBlocked:false,lessonRejectionReasons:{missingGroup:2,missingDate:0,unknownGroup:0}});
+ assert.ok(!JSON.stringify(progress).includes('PRIVATE'));
+});
