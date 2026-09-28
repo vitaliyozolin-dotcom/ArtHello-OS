@@ -215,8 +215,23 @@ class GatewayTests(unittest.TestCase):
         source = '# comment\narthello-188-225-38-55.sslip.io {\n  encode gzip\n  reverse_proxy arthello-direct-34837407187-1:8081\n}\nother.example {\n reverse_proxy other:3000\n}\n'
         result = g.render_routes(source)
         self.assertEqual(result, source.replace('  reverse_proxy arthello-direct-34837407187-1:8081\n', '  reverse_proxy arthello-direct-34837407187-1:8081 {\n    transport http {\n      keepalive off\n    }\n  }\n'))
-        for bad in (source + source, source.replace(':8081\n', ':8081 {\n'), source.replace(':8081\n', ':8081 # comment\n')):
+        for bad in (source + source, source.replace(':8081\n', ':8081 {\n')):
             with self.assertRaises(ValueError): g.render_routes(bad)
+
+    def test_gateway_accepts_http_prefix_existing_block_and_comments(self):
+        g = self.module()
+        for directive in (
+            '  reverse_proxy http://arthello-direct-34837407187-1:8081 # retained comment\n',
+            '  reverse_proxy arthello-direct-34837407187-1:8081 {\n    header_up X-Synthetic retained\n  }\n',
+            '  reverse_proxy http://arthello-direct-34837407187-1:8081 {\n    transport http {\n      dial_timeout 5s\n    }\n  }\n',
+        ):
+            source = 'arthello-188-225-38-55.sslip.io {\n' + directive + '}\n'
+            result = g.render_routes(source)
+            self.assertEqual(result.count('keepalive off'), 1)
+            self.assertEqual(result.count('transport http'), 1)
+            if 'retained' in source: self.assertIn('retained', result)
+            if 'dial_timeout' in source: self.assertIn('dial_timeout 5s', result)
+            self.assertEqual(result.count('reverse_proxy'), 1)
 
     def exercise_repair(self, fail_health=False, drift=False):
         from types import SimpleNamespace
