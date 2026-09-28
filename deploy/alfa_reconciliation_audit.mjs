@@ -36,6 +36,29 @@ export function classifyAlfaApiFailure(status, payload) {
   return upstream ? `ALFA_UPSTREAM_HTTP_${upstream[1]}` : `HTTP_${status}`;
 }
 
+export async function classifyAlfaResponseFailure(response) {
+  const prefix=`HTTP_${response.status}`;
+  let raw='';
+  try {
+    const reader=response.body?.getReader();
+    const chunks=[];let size=0;
+    if(reader) for(;;) {
+      const {done,value}=await reader.read();if(done)break;
+      size+=value.byteLength;
+      if(size>16_384) {try {await reader.cancel();} catch {} return prefix+'_BODY_TOO_LARGE';}
+      chunks.push(value);
+    }
+    const bytes=new Uint8Array(size);let offset=0;
+    for(const chunk of chunks){bytes.set(chunk,offset);offset+=chunk.byteLength;}
+    raw=new TextDecoder().decode(bytes);
+  } catch {return prefix+'_BODY_UNREADABLE';}
+  let payload;
+  try {payload=JSON.parse(raw);} catch {return prefix+'_NON_JSON';}
+  const reason=classifyAlfaApiFailure(response.status,payload);
+  if(reason!==prefix)return reason;
+  return prefix+(typeof payload?.error==='string'?'_UNKNOWN_ERROR':'_UNKNOWN_JSON');
+}
+
 export function summarizePreview(value) {
   const p = value?.customerPreview;
   if (!p || !p.byBranch) throw Error('PREVIEW_INVALID');
@@ -102,9 +125,7 @@ export class AuditClient extends AtlasOwnerAccessHttpClient {
     const response=await fetch(url,{...options,headers,redirect:'manual',signal:AbortSignal.timeout(300_000)});
     this.jar.absorb(url,response.headers);
     if (response.status >= 400) {
-      let payload = null;
-      try { const body = await response.text(); if(body.length <= 16_384) payload=JSON.parse(body); } catch {}
-      throw Error(classifyAlfaApiFailure(response.status,payload));
+      throw Error(await classifyAlfaResponseFailure(response));
     }
     return response;
   }
