@@ -47,6 +47,26 @@ class BackupDiskTests(unittest.TestCase):
             with self.assertRaisesRegex(release.Refused, 'BACKUP_NAME'):
                 release.prepare_backup_directory('../other')
 
+    def test_root_owned_mount_creates_only_new_private_base(self):
+        with tempfile.TemporaryDirectory() as folder, patch.object(release, 'mounted_backup_root', return_value=Path(folder)):
+            base = Path(folder)/'production-snapshots'
+            real_mkdir = Path.mkdir
+            calls = []
+            def mkdir(path, *args, **kwargs):
+                if path == base: raise PermissionError('root-owned mount')
+                return real_mkdir(path, *args, **kwargs)
+            def docker(*args):
+                calls.append(args)
+                real_mkdir(base, mode=0o700)
+                return b''
+            with patch.object(Path, 'mkdir', mkdir), patch.object(release, 'docker', docker):
+                target = release.prepare_backup_directory('arthello-d194-central-123-1', 'sha256:'+'a'*64)
+            self.assertEqual(target.stat().st_mode & 0o777, 0o700)
+            self.assertEqual(len(calls), 1)
+            self.assertIn('type=bind,src='+folder+',dst=/backup-disk', calls[0])
+            self.assertIn('none', calls[0])
+            self.assertIn('no-new-privileges:true', calls[0])
+
     def test_symlink_parent_is_rejected(self):
         with tempfile.TemporaryDirectory() as folder, patch.object(release, 'mounted_backup_root', return_value=Path(folder)):
             (Path(folder)/'production-snapshots').symlink_to('/tmp')

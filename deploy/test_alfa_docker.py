@@ -43,8 +43,13 @@ try:
     else: raise AssertionError('synthetic runtime not ready')
     image_id=json.loads(d('image','inspect',image))[0]['Id']
     plan=release.runtime_plan(old,'central',image_id,'f'*40,'9'*40)
+    real_mkdir = Path.mkdir
+    def simulate_root_owned_mount(path, *args, **kwargs):
+        if path.name == 'production-snapshots': raise PermissionError('root-owned mount')
+        return real_mkdir(path, *args, **kwargs)
     with tempfile.TemporaryDirectory() as directory, patch.object(release.time,'sleep',lambda _:None), \
-         patch.object(release,'public_health',lambda:None), patch.object(release,'mounted_backup_root',lambda:Path(directory)):
+         patch.object(release,'public_health',lambda:None), patch.object(release,'mounted_backup_root',lambda:Path(directory)), \
+         patch.object(Path,'mkdir',simulate_root_owned_mount):
         try:
             receipt=release.upgrade(old,plan,Path(directory),key,lambda:None)
             assert receipt['backup']['integrity']=='ok'

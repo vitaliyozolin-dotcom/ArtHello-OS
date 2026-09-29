@@ -333,12 +333,25 @@ def mounted_backup_root():
     return root
 
 
-def prepare_backup_directory(volume):
+def prepare_backup_directory(volume, image=None):
     require(re.fullmatch(r'arthello-d194-(central|atlas|school)-[0-9]+-[0-9]+', volume), 'BACKUP_NAME')
     root = mounted_backup_root()
     base = root / 'production-snapshots'
     require(not base.is_symlink(), 'BACKUP_DIRECTORY_SYMLINK')
-    base.mkdir(mode=0o700, exist_ok=True)
+    try:
+        base.mkdir(mode=0o700, exist_ok=True)
+    except PermissionError:
+        # The attached filesystem can be root-owned. Create only this new private
+        # directory via the already verified runtime image, never chmod the disk.
+        require(image and re.fullmatch(r'sha256:[a-f0-9]{64}', image), 'BACKUP_DIRECTORY_PERMISSION')
+        require(not base.exists(), 'BACKUP_DIRECTORY_PERMISSION')
+        docker('run', '--rm', '--network', 'none', '--read-only', '--user', '0:0',
+               '--security-opt', 'no-new-privileges:true', '--pids-limit', '32', '--memory', '128m',
+               '--mount', 'type=bind,src=' + str(root) + ',dst=/backup-disk',
+               '--entrypoint', 'node', image, '-e',
+               "const fs=require('node:fs'); const p='/backup-disk/production-snapshots'; "
+               "fs.mkdirSync(p,{mode:0o700}); fs.chownSync(p,Number(process.argv[1]),Number(process.argv[2]));",
+               str(os.geteuid()), str(os.getegid()))
     require(base.resolve() == base and base.stat().st_dev == root.stat().st_dev
             and base.stat().st_uid == os.geteuid() and base.stat().st_mode & 0o077 == 0, 'BACKUP_DIRECTORY_UNSAFE')
     destination = base / volume
@@ -357,7 +370,9 @@ def upgrade(old, plan, work, run_key, current_main):
     require(not docker('volume', 'ls', '-q', '--filter', 'name=^' + backup_volume + '$').strip(), 'BACKUP_EXISTS')
     current_main()
     require(inspect(name)['Id'] == old['Id'], 'LIVE_MOVED')
-    backup_directory = prepare_backup_directory(backup_volume) if system == 'central' else None
+    checkpoint('prepare-backup-directory')
+    backup_directory = prepare_backup_directory(backup_volume, plan['image']) if system == 'central' else None
+    checkpoint('backup-directory-ready')
     envfile = work / (system + '.env')
     envfile.write_text('\n'.join(plan['environment']) + '\n')
     envfile.chmod(0o600)
