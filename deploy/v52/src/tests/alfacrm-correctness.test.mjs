@@ -1033,6 +1033,7 @@ test('real family read follows old ID and returns both children, contracts and o
   assert.ok(target,name);return `from "${target}"`;
  });
  const familyAdapters={...mergeAdapters,
+  "../../../lib/client-reconciliation-handler":dataModule("export const reviewedCards=async cards=>cards;export const handleClientReconciliation=()=>{throw Error('not part of identity fixture')};"),
   '../../../lib/education-conditions-handler':dataModule(educationHandler),
   '../../../lib/family-card-state':dataModule(stripTypeScriptTypes(readFileSync(resolve('lib/family-card-state.ts'),'utf8'),{mode:'strip'})),
   '../../../db':dataModule('export const ensureCoreTables=async()=>{};export const getDb=()=>globalThis.__alfaCorrectness.orm;'),

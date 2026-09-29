@@ -1,6 +1,6 @@
 type FamilyStateInput = {
   status: string; sourceSystem: string; dataQuality: string; metadata: string;
-  hasNameCollision?: boolean;
+  hasNameCollision?: boolean; ownerReconciled?: boolean;
 };
 type DetailEvidence = { parentName?: string; parentNames?: string[]; hasDuplicate?: boolean };
 type Issue = { code: string; reason: string; action: string; target: 'edit' | 'source' | 'identity' };
@@ -34,6 +34,7 @@ export function familyCardState(family: FamilyStateInput, detail?: DetailEvidenc
   const cardStatus = family.status === 'Активна' ? 'Текущая' : family.status;
   const issues: Issue[] = [];
   if (family.status === 'Архив' || family.status === 'Объединена') return { customerStatus, cardStatus, issues };
+  if (family.ownerReconciled) return { customerStatus, cardStatus, issues };
   if (family.hasNameCollision || detail?.hasDuplicate) issues.push({code:'name-collision',reason:'Есть другая карточка с таким же названием',action:'Сравните детей, представителей и исходные карточки в «Единых карточках». Не объединяйте семьи только по совпадению имени.',target:'identity'});
   // The list has no linked representative evidence; do not guess from old import metadata.
   const parentNames = detail?.parentNames ?? [detail?.parentName ?? ''];

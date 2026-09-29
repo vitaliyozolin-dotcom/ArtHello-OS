@@ -1,3 +1,4 @@
+import { reviewedCards } from "../../../lib/client-reconciliation-handler";
 import { buildIdentityIndex } from "../../../lib/entity-identity";
 import { and, desc, eq, inArray, or } from "drizzle-orm";
 import { ensureCoreTables, getDb } from "../../../db";
@@ -23,7 +24,7 @@ export async function GET(request: Request) {
     const identities = buildIdentityIndex(allCards, merges);
     const canonicalId = identities.canonical(id);
     const mergedIds = identities.members(id);
-    entity = allCards.find(card => card.id === canonicalId)!;
+    [entity] = await reviewedCards([allCards.find(card => card.id === canonicalId)!]);
     const links = await db.select().from(entityLinks).where(or(inArray(entityLinks.fromEntityId, mergedIds), inArray(entityLinks.toEntityId, mergedIds)));
     const peerIds = [...new Set(links.flatMap((link) => [link.fromEntityId, link.toEntityId]).filter((peerId) => !mergedIds.includes(peerId)))];
     const peers = peerIds.length ? await db.select().from(entities).where(inArray(entities.id, peerIds)) : [];
