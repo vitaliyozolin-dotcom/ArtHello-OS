@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useState } from 'react';
+import styles from './FamilyEducationConditions.module.css';
 type Branch={remoteBranchId:string;name:string};
 type ConditionsResponse={error?:string;enabled?:boolean;branch:string;remoteBranchId:string;branches:Branch[];selectionRequired?:boolean};
 export function FamilyEducationConditions({familyId,childId,childName}:{familyId:string;childId:string;childName:string}) {
@@ -18,11 +19,11 @@ export function FamilyEducationConditions({familyId,childId,childName}:{familyId
     setState({enabled:data.enabled===true,branch:data.branch,remoteBranchId:data.remoteBranchId});
   }catch(reason){setError(reason instanceof Error?reason.message:'Ошибка связи');}finally{setBusy(false);}}
   if(hidden)return null;
-  return <section aria-label={`Условия обучения: ${childName}`}><header><span>Условия обучения · {childName}</span></header>
+  return <details className={styles.conditions} aria-label={`Условия обучения: ${childName}`}><summary>{state?.enabled?"Основное обучение без оплаты":"Условия обучения"}</summary>
     {branches.length>1?<label>Филиал обучения<select aria-label={`Филиал обучения: ${childName}`} disabled={busy} value={remoteBranchId||state?.remoteBranchId||''} onChange={event=>{setRemoteBranchId(event.target.value);setState(null);setError('');}}><option value="">Выберите филиал</option>{branches.map(branch=><option key={branch.remoteBranchId} value={branch.remoteBranchId}>{branch.name}</option>)}</select></label>:null}
-    {state?<><p>{state.branch}: {state.enabled?'Учится · основное обучение без оплаты':'Условия по источнику; бесплатное обучение не подтверждено'}</p>
-      <p>Отдельное решение собственника. Не меняет старые начисления, остатки, питание, дополнительные услуги или доступ. Учебный состав обновляется при следующей синхронизации.</p>
+    {state?<><p>{state.branch}: {state.enabled?'Учится · основное обучение без оплаты':'По условиям AlfaCRM'}</p>
+      <p className={styles.note}>Отдельное решение собственника. Не меняет старые начисления, остатки, питание, дополнительные услуги или доступ. Учебный состав обновляется при следующей синхронизации.</p>
       <button disabled={busy} onClick={()=>void save()}>{busy?'Сохраняем…':state.enabled?'Снять отметку бесплатного обучения':'Подтвердить обучение без оплаты'}</button></>:!error&&!branches.length?<p>Загружаем условия…</p>:null}
     {error?<p role="alert">{error}</p>:null}
-  </section>;
+  </details>;
 }
