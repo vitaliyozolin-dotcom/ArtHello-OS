@@ -164,12 +164,14 @@ try {
       return {left:r.left,top:r.top,right:r.right,bottom:r.bottom,width:r.width,
         overflow:e.scrollWidth>e.clientWidth+2,
         bodyOverflow:e.querySelector('.family-detail-body').scrollWidth>e.querySelector('.family-detail-body').clientWidth+2,
-        columns:getComputedStyle(overview).gridTemplateColumns.trim().split(/\s+/).length,
+        columns:Number(getComputedStyle(overview).columnCount),
+        title:getComputedStyle(e.querySelector('.family-detail-identity h2')).fontSize,
         font:getComputedStyle(e.querySelector('.family-detail-contact p')).fontSize,
         heading:getComputedStyle(e.querySelector('.family-detail-panel h3')).fontSize};
     });
     assert(metrics.left>=0&&metrics.top>=0&&metrics.right<=width+2&&metrics.bottom<=height+2);
     assert(!metrics.overflow&&!metrics.bodyOverflow);
+    assert(metrics.width<=880);assert.equal(metrics.title,'18px');
     assert.equal(metrics.columns,width<=760?1:2);assert.equal(metrics.font,'16px');assert.equal(metrics.heading,'18px');
     cardMetrics.push({viewport:[width,height],...metrics});
     await page.screenshot({path:'/evidence/client-card-'+width+'.png'});

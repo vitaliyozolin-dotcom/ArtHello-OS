@@ -1,9 +1,9 @@
-.card{min-width:0;padding:var(--ah-space-5);border-radius:var(--ah-radius-card);background:var(--ah-color-surface);color:var(--ah-color-text-primary);overflow-wrap:anywhere;font-size:var(--ah-font-size-body);line-height:var(--ah-line-height-body)}
-.card header{margin-bottom:var(--ah-space-4);font-size:var(--ah-font-size-card-title);line-height:var(--ah-line-height-card-title);font-weight:600}
+.card{min-width:0;padding:var(--ah-space-4);border-radius:var(--ah-radius-card);background:var(--ah-color-surface);color:var(--ah-color-text-primary);overflow-wrap:anywhere;font-size:var(--ah-font-size-body);line-height:var(--ah-line-height-body)}
+.card header{margin-bottom:var(--ah-space-2);font-size:var(--ah-font-size-card-title);line-height:var(--ah-line-height-card-title);font-weight:600}
 .card p{margin:var(--ah-space-2) 0;color:var(--ah-color-text-secondary)}
 .card article{display:grid;gap:var(--ah-space-1)}.card article+article{margin-top:var(--ah-space-4);padding-top:var(--ah-space-4);border-top:1px solid var(--ah-color-border)}
 .card article strong{font-size:var(--ah-font-size-label);line-height:var(--ah-line-height-label);font-weight:400;color:var(--ah-color-text-secondary)}
 .card article time,.currency{font-size:var(--ah-font-size-label);line-height:var(--ah-line-height-label);color:var(--ah-color-text-secondary)}
-.amount{font-size:24px;line-height:32px;font-weight:600;font-variant-numeric:tabular-nums}
-.card details{margin-top:var(--ah-space-4);font-size:var(--ah-font-size-label);line-height:var(--ah-line-height-label)}.card summary{min-height:44px;display:list-item;align-content:center;color:var(--ah-color-text-secondary);cursor:pointer}.card details[open] summary{color:var(--ah-color-primary)}
+.amount{font-size:var(--ah-font-size-card-title);line-height:var(--ah-line-height-card-title);font-weight:600;font-variant-numeric:tabular-nums}
+.card details{margin-top:var(--ah-space-2);font-size:var(--ah-font-size-label);line-height:var(--ah-line-height-label)}.card summary{min-height:44px;display:list-item;align-content:center;color:var(--ah-color-text-secondary);cursor:pointer}.card details[open] summary{color:var(--ah-color-primary)}
 @media(max-width:760px){.card{padding:var(--ah-space-4)}}
