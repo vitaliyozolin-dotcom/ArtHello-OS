@@ -34,6 +34,20 @@ try {
       db.prepare(`INSERT INTO bank_transactions(id,connection_id,legal_entity_id,provider_account_id,provider_statement_id,provider_transaction_id,operation_date,direction,amount_minor,currency,status,description,counterparty_name,counterparty_inn,source_payload_hash,financial_operation_id,imported_at)
         VALUES(?,'CI-CONNECTION','CI-ENTITY','CI-ACCOUNT','CI-STATEMENT',?,'2026-09-10',?,?,'RUB','booked',?,'CI контрагент',?,'CI-SYNTHETIC',?,'2026-09-10T00:00:00Z')`).run('CI-BANK-'+id,'CI-TX-'+id,direction,amount,purpose,inn,'CI-FIN-'+id);
     }
+    // Shared client-card fixture: two children, long names and multiple branches.
+    const branches=db.prepare("SELECT name FROM organization_branches WHERE status='Активен' ORDER BY sort_order LIMIT 2").all().map(row=>row.name);
+    assert(branches.length===2);
+    const familyMeta={branch:branches[0],branchAssignments:branches.map(scope=>({scope,active:true})),note:'Просьба связываться после 16:00'};
+    const clients=[
+      ['CI-CARD-FAMILY','Семья','Семья Соколовых — Александра и Михаил',familyMeta],
+      ['CI-CARD-PARENT','Клиент','Соколова Александра Константиновна',{relation:'Мама',phone:'+7 000 000-00-00',email:'synthetic-family@example.invalid'}],
+      ['CI-CARD-CHILD-1','Ребёнок','Соколов Михаил Александрович',{className:'3 класс',groupName:'Творческая студия',birthDate:'2017-04-12'}],
+      ['CI-CARD-CHILD-2','Ребёнок','Соколова Екатерина Александровна',{className:'1 класс',birthDate:'2019-06-01'}]
+    ];
+    for(const [id,type,name,meta] of clients) {
+      db.prepare("INSERT INTO entities(id,entity_type,display_name,status,source_system,source_record_id,data_quality,scope,metadata,created_by) VALUES(?,?,?,'Активна','MANUAL',?,'Проверено',?,?,'CI fixture')").run(id,type,name,id,branches[0],JSON.stringify(meta));
+      if(id!=='CI-CARD-FAMILY')db.prepare("INSERT INTO entity_links(from_entity_id,to_entity_id,relation_type,created_by) VALUES('CI-CARD-FAMILY',?,'Семья','CI fixture')").run(id);
+    }
     db.exec('COMMIT');
     writeFileSync('/tmp/finance-ci-bank.sha256', bankHash());
   } else {

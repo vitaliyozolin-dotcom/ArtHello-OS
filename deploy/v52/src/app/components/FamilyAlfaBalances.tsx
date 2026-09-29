@@ -13,19 +13,18 @@ export type FamilyAlfaBalance = {
 export function FamilyAlfaBalanceRows({ balances }: { balances: FamilyAlfaBalance[] }) {
   return <section className={styles.card} aria-label="Остатки AlfaCRM">
     <header><span>Остатки AlfaCRM</span></header>
-    <p>Последний подтверждённый денежный остаток клиента. Дата получения указана для каждого счёта.</p>
     {!balances.length ? <p>Остаток не получен. Подключите AlfaCRM и выполните выбранный импорт остатков в разделе «Интеграции».</p> : balances.map((row) => {
       const known = row.status === "available" && Number.isSafeInteger(row.balanceMinor)
         && row.observedAt !== null && Number.isFinite(Date.parse(row.observedAt));
       return <article key={JSON.stringify([row.remoteBranchId, row.customerId])}>
         <strong>{row.branchName} · клиент №{row.customerId}</strong>
         <span className={styles.amount}>{known ? new Intl.NumberFormat("ru-RU", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(row.balanceMinor! / 100) : "Не подтверждён"}</span>
-        <span>Источник: AlfaCRM</span>
+        {known ? <small className={styles.currency}>Валюта не указана</small> : null}
         {known ? <time dateTime={row.observedAt!}>Получено {new Intl.DateTimeFormat("ru-RU", { dateStyle: "short", timeStyle: "short", timeZone: "Europe/Moscow" }).format(new Date(row.observedAt!))} МСК</time> : null}
         {known && row.refreshUnconfirmed ? <span>Последнее обновление не подтверждено. Показан предыдущий подтверждённый остаток.</span> : null}
       </article>;
     })}
-    <p>Валюта в данных AlfaCRM не указана. Эти остатки учитываются отдельно от банковских платежей и не суммируются между счетами.</p>
+    <details><summary>Об источнике и остатках</summary><p>Последний подтверждённый денежный остаток клиента. Дата получения указана для каждого счёта.</p><p>Источник: AlfaCRM</p><p>Валюта в данных AlfaCRM не указана. Эти остатки учитываются отдельно от банковских платежей и не суммируются между счетами.</p></details>
   </section>;
 }
 

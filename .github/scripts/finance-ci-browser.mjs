@@ -146,6 +146,50 @@ try {
   await dialog.getByRole('button',{name:'Свернуть',exact:true}).click();
   const note='CI комментарий владельца';await dialog.getByPlaceholder('Добавить комментарий…').fill(note);await save(()=>dialog.getByRole('button',{name:'Добавить',exact:true}).click(),201);await dialog.getByText(note,{exact:true}).waitFor();
   await page.screenshot({path:'/evidence/mobile-operation-card.png',fullPage:true});
+  stage='client_card';
+  await page.setViewportSize({width:1440,height:900});
+  await page.goto(ORIGIN+'/#clients');
+  await page.getByPlaceholder('Найти семью по имени').fill('Семья Соколовых');
+  const familyButton=page.locator('.family-main').filter({hasText:'Семья Соколовых — Александра и Михаил'});
+  await familyButton.click();
+  const card=page.locator('.family-detail-card');
+  await card.waitFor();
+  await card.getByText('Соколова Екатерина Александровна',{exact:true}).waitFor();
+  const cardMetrics=[];
+  for(const [width,height] of [[375,812],[390,844],[430,932],[768,1024],[1440,900],[2560,1440]]) {
+    stage='client_card_'+width;
+    await page.setViewportSize({width,height});
+    const metrics=await card.evaluate(e=>{
+      const r=e.getBoundingClientRect(),overview=e.querySelector('.family-detail-overview');
+      return {left:r.left,top:r.top,right:r.right,bottom:r.bottom,width:r.width,
+        overflow:e.scrollWidth>e.clientWidth+2,
+        bodyOverflow:e.querySelector('.family-detail-body').scrollWidth>e.querySelector('.family-detail-body').clientWidth+2,
+        columns:getComputedStyle(overview).gridTemplateColumns.trim().split(/\s+/).length,
+        font:getComputedStyle(e.querySelector('.family-detail-contact p')).fontSize,
+        heading:getComputedStyle(e.querySelector('.family-detail-panel h3')).fontSize};
+    });
+    assert(metrics.left>=0&&metrics.top>=0&&metrics.right<=width+2&&metrics.bottom<=height+2);
+    assert(!metrics.overflow&&!metrics.bodyOverflow);
+    assert.equal(metrics.columns,width<=760?1:2);assert.equal(metrics.font,'16px');assert.equal(metrics.heading,'18px');
+    cardMetrics.push({viewport:[width,height],...metrics});
+    await page.screenshot({path:'/evidence/client-card-'+width+'.png'});
+  }
+  stage='client_card_actions';
+  await page.setViewportSize({width:1440,height:900});
+  await card.getByRole('button',{name:'Подробности',exact:true}).click();
+  await card.getByRole('heading',{name:'Данные карточки',exact:true}).waitFor();
+  await card.getByRole('button',{name:'Связи',exact:true}).click();
+  await card.locator('.family-network-canvas').waitFor();
+  await card.getByRole('button',{name:'Обзор',exact:true}).click();
+  await card.focus();await page.keyboard.press('Shift+Tab');
+  assert(await card.evaluate(e=>e.contains(document.activeElement)));
+  await page.keyboard.press('Escape');await card.waitFor({state:'hidden'});
+  assert(await familyButton.evaluate(e=>document.activeElement===e));
+  await familyButton.click();
+  await card.getByRole('button',{name:'Редактировать',exact:true}).click();
+  await page.locator('.family-editor').waitFor();await card.waitFor({state:'hidden'});
+  await page.locator('.family-editor').getByRole('button',{name:'Отмена',exact:true}).click();
+  writeFileSync('/evidence/client-card-result.json',JSON.stringify({result:'pass',sourceSha:process.env.CHECKED_SOURCE_SHA,actualApplication:true,actualDatabase:true,syntheticFamily:true,cardMetrics,keyboard:true,editNavigation:true},null,2));
   assert.equal(loginCount,1);assert.equal(transportFailed,false);assert.equal(errors.length,0);assert.equal(writes.filter(x=>x==='classifyOperation').length,2);assert.equal(writes.filter(x=>x==='addOperationComment').length,1);assert.equal(writes.length,10);
   const result={kind:'finance-isolated-browser',result:'pass',sourceSha:process.env.CHECKED_SOURCE_SHA,viewports:[1440,390],actualApplication:true,actualDatabase:true,apiMocked:false,dashboardWrites,mobileBranchOptions,mobileBranchFailure,mobileMetrics,sessionInjected:false,chromiumSandbox:'verified',productionAcceptance:'not_run',bankFacts:'synthetic CI only',screenshots:['desktop-articles.png','desktop-dds.png','mobile-articles.png','mobile-allocation.png','mobile-operation-card.png']};
   writeFileSync('/evidence/result.json',JSON.stringify(result,null,2));console.log(JSON.stringify(result));
