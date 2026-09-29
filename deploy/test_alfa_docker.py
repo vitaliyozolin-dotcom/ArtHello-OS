@@ -40,7 +40,7 @@ function fixture(count=32) {
     CREATE TABLE alfacrm_customer_balances(customer_id TEXT,remote_branch_id TEXT,balance_minor INTEGER);
     CREATE TABLE financial_operations(id TEXT PRIMARY KEY,amount_minor INTEGER);
   `);
-  db.prepare('INSERT INTO system_runtime_state VALUES(?,?,?)').run('alfacrm_connector:v1',JSON.stringify({endpoint:'https://arthellonew.s20.online',branchMappings:{'6':'BR-KINDERGARTEN','10':'BR-ATLAS-SCHOOL'}}),'');
+  db.prepare('INSERT INTO system_runtime_state VALUES(?,?,?)').run('alfacrm_connector:v1',JSON.stringify({connected:true,autosync:{enabled:false},endpoint:'https://arthellonew.s20.online',branchMappings:{'6':'BR-KINDERGARTEN','10':'BR-ATLAS-SCHOOL'}}),'');
   db.exec("INSERT INTO education_groups VALUES('garden','BR-KINDERGARTEN'),('school','BR-ATLAS-SCHOOL'); INSERT INTO financial_operations VALUES('old',12345);");
   for(let n=1;n<=count;n++) add(db,n);
   return db;
