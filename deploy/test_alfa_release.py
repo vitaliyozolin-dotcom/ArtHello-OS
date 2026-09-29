@@ -29,6 +29,31 @@ def runtime():
     }
 
 
+class BackupDiskTests(unittest.TestCase):
+    def test_missing_mount_refuses_before_creating_backup(self):
+        with patch.object(Path, 'is_mount', return_value=False):
+            with self.assertRaisesRegex(release.Refused, 'BACKUP_DISK_NOT_MOUNTED'):
+                release.mounted_backup_root()
+
+    def test_private_unique_directory_and_existing_data_preserved(self):
+        with tempfile.TemporaryDirectory() as folder, patch.object(release, 'mounted_backup_root', return_value=Path(folder)):
+            untouched = Path(folder)/'existing-data'; untouched.write_text('retain')
+            target = release.prepare_backup_directory('arthello-d194-central-123-1')
+            self.assertEqual(target.parent.name, 'production-snapshots')
+            self.assertEqual(target.stat().st_mode & 0o777, 0o700)
+            self.assertEqual(untouched.read_text(), 'retain')
+            with self.assertRaisesRegex(release.Refused, 'BACKUP_DIRECTORY_EXISTS'):
+                release.prepare_backup_directory('arthello-d194-central-123-1')
+            with self.assertRaisesRegex(release.Refused, 'BACKUP_NAME'):
+                release.prepare_backup_directory('../other')
+
+    def test_symlink_parent_is_rejected(self):
+        with tempfile.TemporaryDirectory() as folder, patch.object(release, 'mounted_backup_root', return_value=Path(folder)):
+            (Path(folder)/'production-snapshots').symlink_to('/tmp')
+            with self.assertRaisesRegex(release.Refused, 'BACKUP_DIRECTORY_SYMLINK'):
+                release.prepare_backup_directory('arthello-d194-central-123-1')
+
+
 class ReleaseTests(unittest.TestCase):
     def test_central_predecessor_is_the_successful_d194_receipt(self):
         self.assertEqual(release.PINS['central'][0], 'd83da0ce8311a4b60832031a217b91c7dd6bb1c8')
@@ -96,7 +121,7 @@ class ReleaseTests(unittest.TestCase):
             item = json.loads(json.dumps(old))
             if any(call[0]=='stop' for call in calls): item['State']['Running']=False
             return item
-        with tempfile.TemporaryDirectory() as directory, patch.object(release,'docker',docker), patch.object(release,'inspect',inspect):
+        with tempfile.TemporaryDirectory() as directory, patch.object(release,'docker',docker), patch.object(release,'inspect',inspect), patch.object(release,'prepare_backup_directory',return_value=Path(directory)/'snapshot'):
             with self.assertRaises(release.Refused):
                 release.upgrade(old,plan,Path(directory),'123-1',lambda:None)
             self.assertFalse((Path(directory)/'central.env').exists())
@@ -105,6 +130,9 @@ class ReleaseTests(unittest.TestCase):
         backup_call = next(call for call in calls if call[0] == 'run')
         self.assertLess(next(i for i, call in enumerate(calls) if call[0] == 'stop'), calls.index(backup_call))
         self.assertIn('SNAPSHOT_WRITER_STOPPED=1', backup_call)
+        volume_call = next(call for call in calls if call[:2] == ('volume','create'))
+        self.assertIn('o=bind', volume_call)
+        self.assertTrue(any(str(arg).startswith('device=') and str(arg).endswith('/snapshot') for arg in volume_call))
 
     def test_post_public_failure_preserves_current_database_and_recovers_container(self):
         old = runtime(); calls=[]; renamed=False; started=False
@@ -125,7 +153,7 @@ class ReleaseTests(unittest.TestCase):
                 item['Image']=plan['image'];item['Config']['Env']=plan['environment'];item['RestartCount']=0
             elif any(call[0]=='stop' for call in calls): item['State']['Running']=False
             return item
-        with tempfile.TemporaryDirectory() as directory, patch.object(release,'docker',docker), patch.object(release,'inspect',inspect), \
+        with tempfile.TemporaryDirectory() as directory, patch.object(release,'docker',docker), patch.object(release,'inspect',inspect), patch.object(release,'prepare_backup_directory',return_value=Path(directory)/'snapshot'), \
              patch.object(release,'health',lambda *args:None), patch.object(release.time,'sleep',lambda _:None), \
              patch.object(release,'public_health',side_effect=release.Refused('PUBLIC_FAILED')):
             with self.assertRaises(release.Refused):

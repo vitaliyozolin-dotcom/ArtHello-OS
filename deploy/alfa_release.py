@@ -326,6 +326,28 @@ def stable_health_window(name, port, restart_count, soak_checks=13, recovery_che
     raise Refused('HEALTH_RECOVERY')
 
 
+def mounted_backup_root():
+    root = Path('/mnt/arthello-release')
+    require(not root.is_symlink() and root.resolve() == root and root.is_mount(), 'BACKUP_DISK_NOT_MOUNTED')
+    require(root.stat().st_dev != Path('/').stat().st_dev, 'BACKUP_DISK_IS_ROOT')
+    return root
+
+
+def prepare_backup_directory(volume):
+    require(re.fullmatch(r'arthello-d194-(central|atlas|school)-[0-9]+-[0-9]+', volume), 'BACKUP_NAME')
+    root = mounted_backup_root()
+    base = root / 'production-snapshots'
+    require(not base.is_symlink(), 'BACKUP_DIRECTORY_SYMLINK')
+    base.mkdir(mode=0o700, exist_ok=True)
+    require(base.resolve() == base and base.stat().st_dev == root.stat().st_dev
+            and base.stat().st_uid == os.geteuid() and base.stat().st_mode & 0o077 == 0, 'BACKUP_DIRECTORY_UNSAFE')
+    destination = base / volume
+    require(not destination.exists() and not destination.is_symlink(), 'BACKUP_DIRECTORY_EXISTS')
+    destination.mkdir(mode=0o700)
+    require(destination.stat().st_dev == root.stat().st_dev, 'BACKUP_DISK_MOVED')
+    return destination
+
+
 def upgrade(old, plan, work, run_key, current_main):
     name, retained = plan['name'], plan['name'] + '-pre-d194-' + run_key
     system = plan['system']
@@ -335,6 +357,7 @@ def upgrade(old, plan, work, run_key, current_main):
     require(not docker('volume', 'ls', '-q', '--filter', 'name=^' + backup_volume + '$').strip(), 'BACKUP_EXISTS')
     current_main()
     require(inspect(name)['Id'] == old['Id'], 'LIVE_MOVED')
+    backup_directory = prepare_backup_directory(backup_volume)
     envfile = work / (system + '.env')
     envfile.write_text('\n'.join(plan['environment']) + '\n')
     envfile.chmod(0o600)
@@ -344,6 +367,7 @@ def upgrade(old, plan, work, run_key, current_main):
     def record(phase):
         value = {'phase': phase, 'system': system, 'name': name, 'previousContainerId': old['Id'],
                  'retained': retained, 'dataVolume': plan['dataVolume'], 'backupVolume': backup_volume,
+                 'backupDirectory': str(backup_directory),
                  'candidateImage': plan['image'], 'databaseRestoreAllowed': False}
         temp = journal.with_suffix('.tmp')
         with temp.open('w') as output:
@@ -371,7 +395,9 @@ def upgrade(old, plan, work, run_key, current_main):
             other = inspect(container_id)
             require(not any(m.get('Name') == plan['dataVolume'] and m.get('RW') for m in other['Mounts']), 'OTHER_WRITER')
         require(inspect(old['Id'])['State']['Running'] is False, 'WRITER_NOT_STOPPED')
-        docker('volume', 'create', '--label', 'arthello.scope=production-backup', backup_volume)
+        docker('volume', 'create', '--label', 'arthello.scope=production-backup',
+               '--driver', 'local', '--opt', 'type=none', '--opt', 'o=bind',
+               '--opt', 'device=' + str(backup_directory), backup_volume)
         checkpoint('wal-complete-snapshot')
         output = docker('run', '--rm', '--network', 'none', '--read-only', '--user', '0:0',
                         '--security-opt', 'no-new-privileges:true', '--pids-limit', '32', '--memory', '512m',
