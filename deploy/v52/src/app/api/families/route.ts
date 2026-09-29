@@ -1,3 +1,4 @@
+import { handleClientReconciliation, reviewedCards } from "../../../lib/client-reconciliation-handler";
 import { handleEducationConditions } from "../../../lib/education-conditions-handler";
 import { editableFamilyExtras } from "../../../lib/family-card-state";
 import { env } from "cloudflare:workers";
@@ -12,6 +13,7 @@ import { getRequestUser } from "../../../lib/request-user";
 export async function GET(request:Request){
   const actor=getRequestUser(request);if(!actor)return Response.json({error:"Требуется вход"},{status:401});
   try{
+    if(new URL(request.url).searchParams.get("action")==="client-reconciliation")return handleClientReconciliation(request);
     if(new URL(request.url).searchParams.get("action")==="education-conditions")return handleEducationConditions(request);
     await ensureCoreTables();const id=new URL(request.url).searchParams.get("id")?.trim()||"";if(!id)return Response.json({error:"Укажите семью"},{status:400});const db=getDb();
     const identities=await readIdentityIndex(env.DB);if(!identities.cards.some(card=>card.id===id))return Response.json({error:"Семья не найдена"},{status:404});const canonicalId=identities.canonical(id),familyIds=identities.members(id);
@@ -24,7 +26,7 @@ export async function GET(request:Request){
         if(identities.cards.some(card=>familyIds.includes(card.id)&&!grants.some(grant=>grant.name===card.scope)))return Response.json({error:"Нет доступа ко всем филиалам единой карточки"},{status:403});
       }
     }
-    const[family]=await db.select().from(entities).where(eq(entities.id,canonicalId)).limit(1);if(!family||family.entityType!=="Семья")return Response.json({error:"Семья не найдена"},{status:404});
+    const[storedFamily]=await db.select().from(entities).where(eq(entities.id,canonicalId)).limit(1);const[family]=storedFamily?await reviewedCards([storedFamily]):[];if(!family||family.entityType!=="Семья")return Response.json({error:"Семья не найдена"},{status:404});
     const links=await db.select().from(entityLinks).where(or(inArray(entityLinks.fromEntityId,familyIds),inArray(entityLinks.toEntityId,familyIds)));const memberIds=[...new Set(links.map(link=>familyIds.includes(link.fromEntityId)?link.toEntityId:link.fromEntityId).filter(peer=>!familyIds.includes(peer)).map(peer=>identities.canonical(peer)))];
     const members=memberIds.length?await db.select().from(entities).where(inArray(entities.id,memberIds)):[];
     const[operations,students,groups,leads,lifecycles,accruals,contracts,familyCandidates]=await Promise.all([
@@ -45,7 +47,7 @@ export async function GET(request:Request){
     ]);
     const relatedIds=[...new Set(leads.flatMap(lead=>[lead.managerEntityId,lead.childEntityId,lead.serviceEntityId]).filter(Boolean))],relatedEntities=relatedIds.length?await db.select({id:entities.id,displayName:entities.displayName}).from(entities).where(inArray(entities.id,relatedIds)):[];
     const groupMap=new Map(groups.map(group=>[group.id,group]));
-    return Response.json({canonicalId,sourceEntityIds:familyIds,family:{...family,dataQuality:familyDataState(family,Boolean(duplicate)),profile:metadata(family.metadata)},hasDuplicate:Boolean(duplicate),members:members.filter(member=>["Клиент","Ребёнок"].includes(member.entityType)).map(member=>({...member,profile:metadata(member.metadata),relation:links.find(link=>identities.canonical(link.fromEntityId)===member.id||identities.canonical(link.toEntityId)===member.id)?.relationType??""})),operations,students:students.map(student=>({...student,group:groupMap.get(student.groupId)??null})),relationship:{leads,touchpoints,stageEvents,lifecycles,accruals,contracts,contractDocuments,entityNames:Object.fromEntries(relatedEntities.map(entity=>[entity.id,entity.displayName]))}});
+    return Response.json({canonicalId,sourceEntityIds:familyIds,family:{...family,dataQuality:familyDataState(family,Boolean(duplicate)&&!(family as {ownerReconciled?:boolean}).ownerReconciled),profile:metadata(family.metadata)},hasDuplicate:Boolean(duplicate)&&!(family as {ownerReconciled?:boolean}).ownerReconciled,members:members.filter(member=>["Клиент","Ребёнок"].includes(member.entityType)).map(member=>({...member,profile:metadata(member.metadata),relation:links.find(link=>identities.canonical(link.fromEntityId)===member.id||identities.canonical(link.toEntityId)===member.id)?.relationType??""})),operations,students:students.map(student=>({...student,group:groupMap.get(student.groupId)??null})),relationship:{leads,touchpoints,stageEvents,lifecycles,accruals,contracts,contractDocuments,entityNames:Object.fromEntries(relatedEntities.map(entity=>[entity.id,entity.displayName]))}});
   }catch{return Response.json({error:"Не удалось загрузить семью"},{status:503})}
 }
 
@@ -71,6 +73,7 @@ export async function PATCH(request:Request){
   const actor=getRequestUser(request);if(!actor)return Response.json({error:"Требуется вход"},{status:401});
   try{
     const body=await request.json() as Record<string,unknown>;
+    if(body.action==="client-reconciliation")return handleClientReconciliation(request,body);
     if(body.action==="education-conditions")return handleEducationConditions(request,body);
     await ensureCoreTables();const familyId=clean(body.familyId,80),parentId=clean(body.parentId,80),childId=clean(body.childId,80),values=familyValues(body);if(!familyId||!parentId||!childId)return Response.json({error:"Не хватает связей семьи"},{status:400});if("error" in values)return Response.json({error:values.error},{status:400});const db=getDb(),now=new Date().toISOString();await assertOperationIds(values.operationIds);
     const[currentFamily]=await db.select().from(entities).where(eq(entities.id,familyId)).limit(1);if(!currentFamily||currentFamily.entityType!=="Семья")return Response.json({error:"Семья не найдена"},{status:404});

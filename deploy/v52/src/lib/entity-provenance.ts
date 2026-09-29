@@ -8,6 +8,7 @@ type EntityIdentity = {
 };
 
 type EntityProvenance = {
+  ownerReconciled?: boolean;
   sourceSystem: string;
   dataQuality: string;
 };
@@ -26,6 +27,7 @@ export function entityDuplicateKey(entity: EntityIdentity) {
 }
 
 export function entityDataState(entity: EntityProvenance, hasDuplicate = false): EntityDataState {
+  if (entity.ownerReconciled) return "Проверено";
   if (hasDuplicate || entity.dataQuality === "Требует сверки") return "Требует сверки";
   if (isManualEntitySource(entity.sourceSystem)) return "Создано вручную";
   return entity.dataQuality === "Проверено" ? "Проверено" : "На проверке";

@@ -5,6 +5,7 @@ import { createPortal } from "react-dom";
 import { familyCardState, isSourceOwnedFamilyField } from "../../lib/family-card-state";
 import { replaceSavedFamily } from "../../lib/family-list-refresh";
 import { recordLabel } from "../../lib/record-labels";
+import { ClientReconciliation } from "./ClientReconciliation";
 import { AppIcon } from "./AppIcon";
 import { SoftSelect } from "./SoftSelect";
 import { FamilyEducationConditions } from "./FamilyEducationConditions";
@@ -39,6 +40,7 @@ export function FamilyWorkspace({notify,onOpenIntegrations,onNavigate,canArchive
   return <section className="page family-workspace" data-ah-inline-help="off">
     <div className="page-heading family-page-heading"><div><p className="eyebrow">Клиент 360° · единый источник</p><h1>Клиенты и семьи</h1><p>Ручная карточка сохраняется сразу. Данные импорта и возможные дубли сверяются отдельно; доступ в личный кабинет выдаётся только явным действием.</p></div><div><button className="secondary-action" onClick={onOpenIntegrations}>Импорт из AlfaCRM</button><button className="primary-action" onClick={()=>setEditor("create")}>+ Семья вручную</button></div></div>
     <div className="client-data-rule"><strong>Карточка не равна доступу</strong><span>Ручной ввод подтверждён автором записи. Импорт и конфликты требуют сверки с источником. В обоих случаях приглашение родителю или ученику не отправляется автоматически.</span></div>
+    {canArchive&&listStatus==="current"?<ClientReconciliation onSaved={()=>void load()}/>:null}
     <div className="family-quality-filter" aria-label="Состояние семей"><button className={listStatus==="current"?"active":""} onClick={()=>setListStatus("current")}>Текущие</button><button className={listStatus==="archive"?"active":""} onClick={()=>setListStatus("archive")}>Архив</button></div>
     <div className="family-toolbar"><label><span aria-hidden="true"><AppIcon name="search"/></span><input value={query} onChange={event=>setQuery(event.target.value)} placeholder="Найти семью по имени"/></label><label>Филиал<select aria-label="Фильтр семей по филиалу" value={selectedBranch} onChange={event=>setSelectedBranch(event.target.value)}><option value="">Все филиалы</option>{branches.map(branch=><option key={branch} value={branch}>{branch}</option>)}</select></label><div className="family-quality-filter"><button className={quality==="Все"?"active":""} onClick={()=>setQuality("Все")}>Все {counts.total}</button><button className={quality==="Нужна сверка"?"active":""} onClick={()=>setQuality("Нужна сверка")}>Нужна сверка {counts.needsReview}</button><button className={quality==="Готово"?"active":""} onClick={()=>setQuality("Готово")}>Готово {counts.ready}</button></div></div>
     {state==="loading"?<div className="family-state"><strong>Загружаем семьи…</strong><span>Собираем единые карточки и связи.</span></div>:null}

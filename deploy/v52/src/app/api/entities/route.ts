@@ -1,3 +1,4 @@
+import { reviewedCards } from "../../../lib/client-reconciliation-handler";
 import { and, asc, eq, sql } from "drizzle-orm";
 import { ensureCoreTables, getDb, getSystemDataMode } from "../../../db";
 import { auditEvents, entities } from "../../../db/schema";
@@ -29,7 +30,7 @@ export async function GET(request: Request) {
     const limit = boundedInteger(url.searchParams.get("limit"), 500, 1, 500);
     const mode = await getSystemDataMode();
     const storedRows = await getDb().select().from(entities).orderBy(asc(entities.entityType), asc(entities.displayName));
-    const listed = listEntities(storedRows, {
+    const listed = listEntities(await reviewedCards(storedRows), {
       type: type && entityTypeSet.has(type) ? type : "",
       q,
       quality,
