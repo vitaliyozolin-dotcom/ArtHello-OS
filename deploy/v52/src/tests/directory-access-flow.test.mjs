@@ -112,7 +112,7 @@ test("family opens its regular card first and keeps relationships behind a tab",
     read("../app/components/ArtHelloShell.tsx"),
     read("../app/components/EducationWorkspace.tsx"),
   ]);
-  assert.match(workspace, /useState<"Карточка"\|"Связи">\("Карточка"\)/);
+  assert.match(workspace, /useState<"Обзор"\|"Подробности"\|"Связи">\("Обзор"\)/);
   assert.match(workspace, /Карточка семьи/);
   assert.match(workspace, /groupId\|\|detail\.students/);
   assert.match(shell, /EducationWorkspace[\s\S]+focusId=/);
