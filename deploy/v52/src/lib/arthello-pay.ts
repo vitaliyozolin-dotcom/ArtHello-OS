@@ -1,4 +1,6 @@
 import { env } from "cloudflare:workers";
+import { loadPayCustomers } from "./pay-customers";
+import { serializeIdentityMutation } from "./entity-identity";
 import {
   getAuthenticatedRequestContext,
   isCanonicalOwnerContext,
@@ -306,14 +308,11 @@ export async function listPayCatalog(context: AuthenticatedRequestContext) {
 export async function searchPayCustomers(
   context: AuthenticatedRequestContext,
   branchId: string,
-  _query: string,
+  query: string,
 ) {
   await assertBranchAccess(context, branchId);
   routeFor(branchId);
-  // Live v52 currently has no normalized family rows. Keep this endpoint
-  // fail-closed instead of guessing from unrelated entities; the UI offers an
-  // explicit manual payer/student fallback until family synchronization fills it.
-  return [] as Array<Record<string, unknown>>;
+  return loadPayCustomers(database(), branchId, query);
 }
 
 export async function listPayObligations(context: AuthenticatedRequestContext) {
@@ -328,6 +327,10 @@ export async function createPayObligation(
   context: AuthenticatedRequestContext,
   body: Record<string, unknown>,
 ) {
+  return serializeIdentityMutation(() => createVerifiedPayObligation(context, body));
+}
+
+async function createVerifiedPayObligation(context: AuthenticatedRequestContext, body: Record<string, unknown>) {
   const branchId = cleanText(body.branchCrmId, 80);
   if (!branchId) throw new ArtHelloPayError("Не выбран филиал");
   await assertBranchAccess(context, branchId);
@@ -338,8 +341,20 @@ export async function createPayObligation(
   const payerEmail = optionalText(body.payerEmail, 320);
   const payerPhone = optionalText(body.payerPhone, 40);
   if (!payerEmail && !payerPhone) throw new ArtHelloPayError("Укажите email или телефон для электронного чека");
-  const studentName = optionalText(body.studentName, 200);
+  let studentName = optionalText(body.studentName, 200);
   const studentCrmId = optionalText(body.studentCrmId, 160);
+  const studentPersonId = optionalText(body.studentPersonId, 120);
+  const familyId = optionalText(body.familyId, 120);
+  const payerPersonId = optionalText(body.payerPersonId, 120);
+  let payerName = optionalText(body.payerName, 200);
+  if (studentPersonId || familyId || payerPersonId) {
+    const candidates = studentPersonId ? await loadPayCustomers(database(), branchId, "", studentPersonId) : [];
+    const selected = candidates.find(row => row.studentPersonId === studentPersonId
+      && row.familyId === familyId && row.studentCrmId === studentCrmId && row.payerPersonId === payerPersonId);
+    if (!selected) throw new ArtHelloPayError("Карточка клиента изменилась или не относится к филиалу. Выберите клиента заново.", 409);
+    studentName = selected.studentName;
+    payerName = selected.payerName || payerName;
+  }
   if (!studentName && !studentCrmId) throw new ArtHelloPayError("Укажите ребёнка или выберите клиента из справочника");
   const sourceRef = optionalText(body.sourceRef, 240);
   const createdAt = nowIso();
@@ -356,12 +371,12 @@ export async function createPayObligation(
         branchId,
         route.legalEntityId,
         route.legalEntityName,
-        optionalText(body.familyId, 120),
-        optionalText(body.payerPersonId, 120),
-        optionalText(body.studentPersonId, 120),
+        familyId,
+        payerPersonId,
+        studentPersonId,
         studentCrmId,
         studentName,
-        optionalText(body.payerName, 200),
+        payerName,
         validDate(body.billingPeriod),
         purpose,
         amountMinor,

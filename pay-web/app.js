@@ -462,7 +462,7 @@ function renderCreateModal() {
                 modal.branchCrmId
                   ? selected
                     ? `
-                <div style="margin-top:12px" class="selected-customer"><div class="customer-avatar">${escapeHtml(initials(selected.studentName))}</div><div class="customer-copy"><strong>${escapeHtml(selected.studentName)}</strong><span>${escapeHtml(selected.payerName || "Плательщик не указан")} · ${escapeHtml(selected.payerPhone || selected.payerEmail || "контакт не найден")}</span></div><button class="text-action" type="button" data-action="change-customer">Изменить</button></div>`
+                <div style="margin-top:12px" class="selected-customer"><div class="customer-avatar">${escapeHtml(initials(selected.studentName))}</div><div class="customer-copy"><strong>${escapeHtml(selected.studentName)}</strong>${selected.tuitionExempt ? "<span>Основное обучение без оплаты. Питание и допуслуги учитываются отдельно.</span>" : ""}<span>${escapeHtml(selected.payerName || "Плательщик не указан")} · ${escapeHtml(selected.payerPhone || selected.payerEmail || "контакт не найден")}</span></div><button class="text-action" type="button" data-action="change-customer">Изменить</button></div>`
                     : `
                 <div class="field" style="margin-top:12px"><label for="customer-search">Ребёнок / семья</label><input class="input" id="customer-search" data-customer-search placeholder="Начните вводить фамилию или телефон" value="${escapeHtml(modal.customerQuery || "")}" /></div>
                 <div class="customer-search-results">${renderCustomerResults()}</div>`
@@ -507,7 +507,7 @@ function renderCustomerResults() {
   return state.customerResults
     .map(
       (item, index) =>
-        `<button class="customer-option" type="button" data-action="select-customer" data-customer-index="${index}"><span class="customer-avatar">${escapeHtml(initials(item.studentName))}</span><span class="customer-copy"><strong>${escapeHtml(item.studentName)}</strong><span>${escapeHtml(item.payerName || "Семья")} · ${escapeHtml(item.payerPhone || item.payerEmail || "без контакта")}</span></span><span>→</span></button>`,
+        `<button class="customer-option" type="button" data-action="select-customer" data-customer-index="${index}"><span class="customer-avatar">${escapeHtml(initials(item.studentName))}</span><span class="customer-copy"><strong>${escapeHtml(item.studentName)}</strong>${item.tuitionExempt ? "<span>Основное обучение без оплаты</span>" : ""}<span>${escapeHtml(item.payerName || "Семья")} · ${escapeHtml(item.payerPhone || item.payerEmail || "без контакта")}</span></span><span>→</span></button>`,
     )
     .join("");
 }
