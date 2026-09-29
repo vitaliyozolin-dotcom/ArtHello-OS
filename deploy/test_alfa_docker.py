@@ -45,15 +45,25 @@ try:
     plan=release.runtime_plan(old,'central',image_id,'f'*40,'9'*40)
     with tempfile.TemporaryDirectory() as directory, patch.object(release.time,'sleep',lambda _:None), \
          patch.object(release,'public_health',lambda:None), patch.object(release,'mounted_backup_root',lambda:Path(directory)):
-        receipt=release.upgrade(old,plan,Path(directory),key,lambda:None)
-        assert receipt['backup']['integrity']=='ok'
-        backup_meta=json.loads(d('volume','inspect',backup))[0]
-        assert backup_meta['Options']['o']=='bind'
-        assert backup_meta['Options']['device']==str(Path(directory)/'production-snapshots'/backup)
-        assert receipt['databaseRestored'] is False
-        assert release.inspect(name)['Id'] != old['Id']
-        assert release.inspect(retained)['State']['Running'] is False
-        assert not list(Path(directory).glob('*.env'))
+        try:
+            receipt=release.upgrade(old,plan,Path(directory),key,lambda:None)
+            assert receipt['backup']['integrity']=='ok'
+            backup_meta=json.loads(d('volume','inspect',backup))[0]
+            assert backup_meta['Options']['o']=='bind'
+            assert backup_meta['Options']['device']==str(Path(directory)/'production-snapshots'/backup)
+            assert receipt['databaseRestored'] is False
+            assert release.inspect(name)['Id'] != old['Id']
+            assert release.inspect(retained)['State']['Running'] is False
+            assert not list(Path(directory).glob('*.env'))
+        finally:
+            # Snapshot files are root-owned; restore fixture ownership before
+            # TemporaryDirectory cleanup on this disposable hosted runner.
+            if d('volume','ls','-q','--filter','name=^'+backup+'$').strip():
+                d('run','--rm','--network','none','--read-only',
+                  '--security-opt','no-new-privileges:true',
+                  '--mount','type=volume,src='+backup+',dst=/snapshot',
+                  '--entrypoint','chown',image,'-R',
+                  str(os.getuid())+':'+str(os.getgid()),'/snapshot')
     release.health(name,8081)
     print('D194_DISPOSABLE_DOCKER_UPGRADE=VERIFIED')
 finally:
