@@ -389,6 +389,10 @@ jobs:
           echo "OLD_CHECKOUT_SKIPPED=$skipped"
           echo "OLD_CHECKOUT_SKIP_PATH=$skipped_path ROOT=$skipped_root ORIGIN=$skipped_origin STATUS=$skipped_status"
           if [ "$OPERATION" = inspect ]; then
+            echo "### Attached block devices and mounted filesystems (read only)"
+            lsblk -b -o NAME,SIZE,FSTYPE,MOUNTPOINTS
+            findmnt -rn -o SOURCE,TARGET,FSTYPE
+            df -hT
             echo 'RUNNER_CHECKOUT_INSPECTED=1'
             exit 0
           fi
