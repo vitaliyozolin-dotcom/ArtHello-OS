@@ -347,7 +347,7 @@ async function createVerifiedPayObligation(context: AuthenticatedRequestContext,
   const familyId = optionalText(body.familyId, 120);
   const payerPersonId = optionalText(body.payerPersonId, 120);
   let payerName = optionalText(body.payerName, 200);
-  if (studentPersonId || familyId || payerPersonId) {
+  if (studentPersonId || familyId || payerPersonId || studentCrmId) {
     const candidates = studentPersonId ? await loadPayCustomers(database(), branchId, "", studentPersonId) : [];
     const selected = candidates.find(row => row.studentPersonId === studentPersonId
       && row.familyId === familyId && row.studentCrmId === studentCrmId && row.payerPersonId === payerPersonId);

@@ -5,10 +5,10 @@ import { buildPayCustomers, loadPayCustomers } from '../lib/pay-customers.ts';
 import { makeEducationCondition, educationConditionKey } from '../lib/education-conditions.ts';
 function fixture() {
   const meta = {localBranchId:'BR-SCHOOL',remoteBranchId:'8',alfaCustomerId:'123',customerLifecycle:'active'};
-  const card = (id, entityType, displayName) => ({id,entityType,displayName,status:'Активна',metadata:JSON.stringify(meta)});
+  const card = (id, entityType, displayName) => ({id,entityType,displayName,status:'Активна',dataQuality:'Импортировано из AlfaCRM',metadata:JSON.stringify(meta)});
   return {branchId:'BR-SCHOOL',query:'',merges:[],conditions:[],
     current:[{remoteBranchId:'8',recordId:'123'}],
-    cards:[card('C','Ребёнок','Тестов Семён'),card('F','Семья','Семья Тест'),{...card('P','Клиент','Тестова Анна'),metadata:JSON.stringify({...meta,phone:'+70000000000',email:'parent@example.invalid'})}],
+    cards:[card('C','Ребёнок','Тестов Семён'),card('F','Семья','Семья Тест'),{...card('P','Клиент','Тестова Анна'),metadata:JSON.stringify({...meta,guardianName:'Тестова Анна',phone:'+70000000000',email:'parent@example.invalid'})}],
     links:[{fromId:'F',toId:'C',relation:'Семья → ребёнок'},{fromId:'F',toId:'P',relation:'Клиентская карточка семьи'}]};
 }
 function change(f,id,patch) {
@@ -62,8 +62,8 @@ test('ambiguous family or duplicate source identity is excluded, ambiguous payer
 test('SQL loader executes read-only queries against the real SQLite schema',async()=>{
   const f=fixture(),sql=new DatabaseSync(':memory:');
   sql.exec("CREATE TABLE organization_branches(id TEXT,status TEXT); INSERT INTO organization_branches VALUES('BR-SCHOOL','Активен');");
-  sql.exec('CREATE TABLE entities(id TEXT,entity_type TEXT,display_name TEXT,status TEXT,metadata TEXT); CREATE TABLE entity_links(from_entity_id TEXT,to_entity_id TEXT,relation_type TEXT); CREATE TABLE entity_merges(survivor_id TEXT,duplicate_id TEXT); CREATE TABLE alfacrm_current_records(module TEXT,remote_branch_id TEXT,record_id TEXT,active INTEGER); CREATE TABLE system_runtime_state(state_key TEXT,state_value TEXT);');
-  for(const c of f.cards)sql.prepare('INSERT INTO entities VALUES(?,?,?,?,?)').run(c.id,c.entityType,c.displayName,c.status,c.metadata);
+  sql.exec('CREATE TABLE entities(id TEXT,entity_type TEXT,display_name TEXT,status TEXT,metadata TEXT,data_quality TEXT); CREATE TABLE entity_links(from_entity_id TEXT,to_entity_id TEXT,relation_type TEXT); CREATE TABLE entity_merges(survivor_id TEXT,duplicate_id TEXT); CREATE TABLE alfacrm_current_records(module TEXT,remote_branch_id TEXT,record_id TEXT,active INTEGER); CREATE TABLE system_runtime_state(state_key TEXT,state_value TEXT);');
+  for(const c of f.cards)sql.prepare('INSERT INTO entities VALUES(?,?,?,?,?,?)').run(c.id,c.entityType,c.displayName,c.status,c.metadata,c.dataQuality);
   for(const l of f.links)sql.prepare('INSERT INTO entity_links VALUES(?,?,?)').run(l.fromId,l.toId,l.relation);
   sql.exec("INSERT INTO alfacrm_current_records VALUES('families','8','123',1); PRAGMA query_only=ON");
   const db={prepare(query){return{all:async()=>({results:sql.prepare(query).all()})};}};
@@ -82,4 +82,10 @@ test('directory limit is applied after search and exact selected-ID resolution',
   assert.equal(buildPayCustomers(f).length,50);
   assert.equal(buildPayCustomers({...f,query:'1059'})[0].studentPersonId,'C59');
   assert.equal(buildPayCustomers({...f,studentPersonId:'C59'})[0].studentPersonId,'C59');
+});
+
+test('placeholder representative is not payer evidence even with a contact',()=>{
+  const f=fixture();f.cards[2].displayName='Представитель семьи';f.cards[2].dataQuality='Требует сверки';
+  const row=buildPayCustomers(f)[0];assert.equal(row.payerPersonId,null);assert.equal(row.payerName,'');
+  assert.equal(row.payerPhone,'');assert.equal(row.payerEmail,'');
 });

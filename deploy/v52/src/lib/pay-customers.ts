@@ -1,7 +1,7 @@
 import { buildIdentityIndex, type IdentityMerge } from './entity-identity.ts';
 import { educationConditionKey, permitsEnrollment } from './education-conditions.ts';
 
-type Card = { id: string; entityType: string; displayName: string; status: string; metadata: string };
+type Card = { id: string; entityType: string; displayName: string; status: string; metadata: string; dataQuality: string };
 type Link = { fromId: string; toId: string; relation: string };
 type CurrentSource = { remoteBranchId: string; recordId: string };
 type Condition = { key: string; value: string };
@@ -57,7 +57,8 @@ export function buildPayCustomers(input: {
     const sourceFamilies = new Set(families.map(card => card.id));
     const parents = input.links.filter(link => sourceFamilies.has(link.fromId) && link.relation === 'Клиентская карточка семьи')
       .map(link => cards.get(link.toId)).filter((card): card is Card => !!card && card.entityType === 'Клиент' && isActive(card)
-        && metadata(card.metadata).localBranchId === input.branchId);
+        && metadata(card.metadata).localBranchId === input.branchId
+        && card.dataQuality === 'Импортировано из AlfaCRM' && !!text(metadata(card.metadata).guardianName));
     // Do not choose a payer or contact when more than one source card qualifies.
     const parent = parents.length === 1 ? parents[0] : undefined;
     const parentMeta = parent ? metadata(parent.metadata) : {};
@@ -86,7 +87,7 @@ export async function loadPayCustomers(db: ReadDatabase, branchId: string, query
   const branches = await db.prepare("SELECT id FROM organization_branches WHERE status IN ('Active','Активен','Активна')").all<{ id: string }>();
   if (!branches.results.some(branch => branch.id === branchId)) return [];
   const [cards, links, merges, current, conditions] = await Promise.all([
-    db.prepare('SELECT id,entity_type AS entityType,display_name AS displayName,status,metadata FROM entities').all<Card>(),
+    db.prepare('SELECT id,entity_type AS entityType,display_name AS displayName,status,metadata,data_quality AS dataQuality FROM entities').all<Card>(),
     db.prepare("SELECT from_entity_id AS fromId,to_entity_id AS toId,relation_type AS relation FROM entity_links WHERE relation_type IN ('Семья → ребёнок','Клиентская карточка семьи')").all<Link>(),
     db.prepare('SELECT survivor_id AS survivorId,duplicate_id AS duplicateId FROM entity_merges').all<IdentityMerge>(),
     db.prepare("SELECT remote_branch_id AS remoteBranchId,record_id AS recordId FROM alfacrm_current_records WHERE module='families' AND active=1").all<CurrentSource>(),

@@ -50,3 +50,20 @@ test('explicit manual entry remains unlinked rather than guessing a canonical id
   const f=obligationFixture();await f.create({appUserId:'OWNER'},{...f.body,familyId:undefined,studentPersonId:undefined,studentCrmId:undefined,payerPersonId:undefined});
   assert.deepEqual(f.calls,['locked']);assert.deepEqual(f.writes[0].slice(4,8),[null,null,null,null]);
 });
+
+test('CRM-only identity cannot bypass selected-card verification',async()=>{
+  const f=obligationFixture();await assert.rejects(f.create({}, {...f.body,familyId:undefined,studentPersonId:undefined,payerPersonId:undefined}),{status:409});
+  assert.equal(f.writes.length,0);
+});
+test('per-submission reference separates branches and distinct equal-amount charges',()=>{
+  let asset;
+  try {asset=readFileSync(new URL('../../public/pay-assets/app.js',import.meta.url),'utf8');}
+  catch(error){if(error.code!=='ENOENT')throw error;asset=readFileSync(new URL('../contract-fixtures/pay-app.js',import.meta.url),'utf8');}
+  const body=asset.match(/function paymentSubmissionRef\([\s\S]*?\n\}/)?.[0];
+  assert.ok(body,'submission reference helper is required');
+  const makeRef=new Function(body+';return paymentSubmissionRef;')();
+  const customer={studentCrmId:'123',remoteBranchId:'8'};
+  assert.notEqual(makeRef('BR-SCHOOL',customer,'A'),makeRef('BR-ATLAS-SCHOOL',{...customer,remoteBranchId:'10'},'A'));
+  assert.notEqual(makeRef('BR-SCHOOL',customer,'A'),makeRef('BR-SCHOOL',customer,'B'));
+  assert.equal(makeRef('BR-SCHOOL',customer,'A'),makeRef('BR-SCHOOL',customer,'A'));
+});

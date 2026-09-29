@@ -751,9 +751,7 @@ async function createPayment(form) {
       dueDate: String(formData.get("dueDate") ?? "") || undefined,
       payerEmail: payerEmail || undefined,
       payerPhone: payerPhone || undefined,
-      sourceRef: selected?.studentCrmId
-        ? `pay-web:${selected.studentCrmId}:${period}:${amountKopecks}`
-        : `pay-web:manual:${branchCrmId}:${period}:${amountKopecks}:${payerEmail || payerPhone}`,
+      sourceRef: paymentSubmissionRef(branchCrmId, selected, modal.submissionId),
     };
     const obligation = await api("/api/payments/obligations", {
       method: "POST",
@@ -832,11 +830,16 @@ async function copyText(value) {
   toast("Ссылка скопирована.", "success");
 }
 
+function paymentSubmissionRef(branchId, selected, submissionId) {
+  return `pay-web:${branchId}:${selected?.remoteBranchId || "manual"}:${selected?.studentCrmId || "manual"}:${submissionId}`;
+}
+
 function openNewPayment() {
   const first = state.catalog[0] ?? null;
   state.customerResults = [];
   state.modal = {
     step: "form",
+    submissionId: crypto.randomUUID(),
     branchCrmId: first?.branchCrmId || "",
     selectedCustomer: null,
     customerQuery: "",
