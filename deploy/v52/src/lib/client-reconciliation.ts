@@ -13,7 +13,7 @@ export async function reviewSignature(c:ReviewCard,cards:ReviewCard[],links:Revi
  let meta:Record<string,unknown>={};try{meta=JSON.parse(c.metadata);}catch{}
  const keys=['remoteBranchId','alfaCustomerId','customerLifecycle','alfaStatusId','alfaStatusName','guardianName','birthDate','phone','email','relation','localArchive'];
  const source=Object.fromEntries(keys.map(k=>[k,meta[k]??null]));
- const assignments=Array.isArray(meta.branchAssignments)?meta.branchAssignments.map((a:any)=>[a.remoteBranchId,a.scope,a.active,a.alfaStatusId,a.alfaStatusName]).sort((a:any,b:any)=>JSON.stringify(a).localeCompare(JSON.stringify(b))):[];
+ const assignments=Array.isArray(meta.branchAssignments)?meta.branchAssignments.map((a:Record<string,unknown>)=>[a.remoteBranchId,a.scope,a.active,a.alfaStatusId,a.alfaStatusName]).sort((a,b)=>JSON.stringify(a).localeCompare(JSON.stringify(b))):[];
  const peers=cards.filter(p=>current(p)&&p.entityType===c.entityType&&name(p.displayName)===name(c.displayName)).map(p=>p.id).sort();
  const relations=links.filter(l=>l.fromEntityId===c.id||l.toEntityId===c.id).map(l=>[l.fromEntityId,l.toEntityId,l.relationType]).sort((a,b)=>JSON.stringify(a).localeCompare(JSON.stringify(b)));
  return digest([c.id,c.entityType,c.displayName,c.sourceSystem,c.sourceRecordId,c.scope,c.status,source,assignments,peers,relations]);

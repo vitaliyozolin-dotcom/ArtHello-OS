@@ -29,8 +29,9 @@ export async function GET(request: Request) {
     const offset = boundedInteger(url.searchParams.get("offset"), 0, 0, 100_000);
     const limit = boundedInteger(url.searchParams.get("limit"), 500, 1, 500);
     const mode = await getSystemDataMode();
-    const storedRows = await getDb().select().from(entities).orderBy(asc(entities.entityType), asc(entities.displayName));
-    const listed = listEntities(await reviewedCards(storedRows), {
+    const rawRows = await getDb().select().from(entities).orderBy(asc(entities.entityType), asc(entities.displayName));
+    const storedRows = await reviewedCards(rawRows);
+    const listed = listEntities(storedRows, {
       type: type && entityTypeSet.has(type) ? type : "",
       q,
       quality,

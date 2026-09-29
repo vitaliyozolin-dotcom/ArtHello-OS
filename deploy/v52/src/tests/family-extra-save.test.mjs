@@ -53,7 +53,7 @@ function fixture({ sourceSystem = 'ALFACRM', authenticated = true, allowed = tru
     insert: table => ({ values: async values => { rows[table.table].push(...(Array.isArray(values) ? values : [values])); } }),
   };
   const dependencies = {
-    ...tables, editableFamilyExtras, env: { DB: {} }, getDb: () => db,
+    ...tables, editableFamilyExtras, reviewedCards: async cards => cards, env: { DB: {} }, getDb: () => db,
     ensureCoreTables: async () => {}, getRequestUser: () => authenticated ? 'test-editor' : null,
     getAuthenticatedRequestContext: async () => ({ appUserId: 'test-editor', auth: { user: { isAdministrative: true } } }),
     isCanonicalOwnerContext: () => false, canAccessApi: () => allowed,
