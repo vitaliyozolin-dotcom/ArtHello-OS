@@ -35,8 +35,9 @@ try {
         VALUES(?,'CI-CONNECTION','CI-ENTITY','CI-ACCOUNT','CI-STATEMENT',?,'2026-09-10',?,?,'RUB','booked',?,'CI контрагент',?,'CI-SYNTHETIC',?,'2026-09-10T00:00:00Z')`).run('CI-BANK-'+id,'CI-TX-'+id,direction,amount,purpose,inn,'CI-FIN-'+id);
     }
     // Shared client-card fixture: two children, long names and multiple branches.
-    const branches=db.prepare("SELECT name FROM organization_branches WHERE status='Активен' ORDER BY sort_order LIMIT 2").all().map(row=>row.name);
-    assert(branches.length===2);
+    // Branch catalog is initialized on the first authenticated settings request.
+    // These display scopes are fixture data and need no pre-existing branch rows.
+    const branches=['Атлас — школа','Небо'];
     const familyMeta={branch:branches[0],branchAssignments:branches.map(scope=>({scope,active:true})),note:'Просьба связываться после 16:00'};
     const clients=[
       ['CI-CARD-FAMILY','Семья','Семья Соколовых — Александра и Михаил',familyMeta],
