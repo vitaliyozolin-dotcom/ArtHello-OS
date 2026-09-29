@@ -357,7 +357,7 @@ def upgrade(old, plan, work, run_key, current_main):
     require(not docker('volume', 'ls', '-q', '--filter', 'name=^' + backup_volume + '$').strip(), 'BACKUP_EXISTS')
     current_main()
     require(inspect(name)['Id'] == old['Id'], 'LIVE_MOVED')
-    backup_directory = prepare_backup_directory(backup_volume)
+    backup_directory = prepare_backup_directory(backup_volume) if system == 'central' else None
     envfile = work / (system + '.env')
     envfile.write_text('\n'.join(plan['environment']) + '\n')
     envfile.chmod(0o600)
@@ -367,7 +367,7 @@ def upgrade(old, plan, work, run_key, current_main):
     def record(phase):
         value = {'phase': phase, 'system': system, 'name': name, 'previousContainerId': old['Id'],
                  'retained': retained, 'dataVolume': plan['dataVolume'], 'backupVolume': backup_volume,
-                 'backupDirectory': str(backup_directory),
+                 'backupDirectory': str(backup_directory) if backup_directory else None,
                  'candidateImage': plan['image'], 'databaseRestoreAllowed': False}
         temp = journal.with_suffix('.tmp')
         with temp.open('w') as output:
@@ -395,9 +395,9 @@ def upgrade(old, plan, work, run_key, current_main):
             other = inspect(container_id)
             require(not any(m.get('Name') == plan['dataVolume'] and m.get('RW') for m in other['Mounts']), 'OTHER_WRITER')
         require(inspect(old['Id'])['State']['Running'] is False, 'WRITER_NOT_STOPPED')
-        docker('volume', 'create', '--label', 'arthello.scope=production-backup',
-               '--driver', 'local', '--opt', 'type=none', '--opt', 'o=bind',
-               '--opt', 'device=' + str(backup_directory), backup_volume)
+        backup_options = ['--driver', 'local', '--opt', 'type=none', '--opt', 'o=bind',
+                          '--opt', 'device=' + str(backup_directory)] if backup_directory else []
+        docker('volume', 'create', '--label', 'arthello.scope=production-backup', *backup_options, backup_volume)
         checkpoint('wal-complete-snapshot')
         output = docker('run', '--rm', '--network', 'none', '--read-only', '--user', '0:0',
                         '--security-opt', 'no-new-privileges:true', '--pids-limit', '32', '--memory', '512m',

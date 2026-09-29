@@ -44,9 +44,12 @@ try:
     image_id=json.loads(d('image','inspect',image))[0]['Id']
     plan=release.runtime_plan(old,'central',image_id,'f'*40,'9'*40)
     with tempfile.TemporaryDirectory() as directory, patch.object(release.time,'sleep',lambda _:None), \
-         patch.object(release,'public_health',lambda:None):
+         patch.object(release,'public_health',lambda:None), patch.object(release,'mounted_backup_root',lambda:Path(directory)):
         receipt=release.upgrade(old,plan,Path(directory),key,lambda:None)
         assert receipt['backup']['integrity']=='ok'
+        backup_meta=json.loads(d('volume','inspect',backup))[0]
+        assert backup_meta['Options']['o']=='bind'
+        assert backup_meta['Options']['device']==str(Path(directory)/'production-snapshots'/backup)
         assert receipt['databaseRestored'] is False
         assert release.inspect(name)['Id'] != old['Id']
         assert release.inspect(retained)['State']['Running'] is False
