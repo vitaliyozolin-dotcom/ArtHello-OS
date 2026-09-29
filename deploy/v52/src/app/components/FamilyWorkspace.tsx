@@ -48,17 +48,17 @@ export function FamilyWorkspace({notify,onOpenIntegrations,onNavigate,canArchive
     {state==="error"?<div className="family-state"><strong>Семьи временно недоступны</strong><button onClick={()=>void load()}>Повторить</button></div>:null}
     {state==="ready"&&!visible.length?<div className="family-state"><strong>Семей в этом списке пока нет</strong><span>Импортируйте данные из AlfaCRM или создайте семью вручную.</span><button onClick={()=>setEditor("create")}>+ Добавить семью</button></div>:null}
     {state==="ready"&&visible.length?<><div className="family-grid">{visible.map(family=><article key={family.id}><button className="family-main" disabled={networkLoadingId===family.id} onClick={event=>void openNetwork(family.id,event.currentTarget)}><span className="family-card-heading"><span>{recordLabel("Семья",family.id)}</span><span className="family-card-status">{familyCardState(family).cardStatus}</span></span><h2>{family.displayName}</h2><p>{familyBranches(family)}</p><small>{networkLoadingId===family.id?"Открываем карточку…":`${sourceLabel(family.sourceSystem)} · ${familyCustomerStatus(family)}`}</small></button><div className="family-next-action"><strong>{familyCardState(family).issues.length ? "Что нужно сделать" : family.status==="Архив"?"Карточка в архиве":family.status==="Объединена"?"Карточка объединена":"Данные карточки проверены"}</strong>{familyCardState(family).issues.map(issue=><p key={issue.code}>{issue.reason}</p>)}{familyCardState(family).issues.length>0?<button onClick={event=>void openNetwork(family.id,event.currentTarget)}>Подробнее →</button>:null}</div><footer><div><button disabled={busy} onClick={()=>void edit(family.id)}>Редактировать</button><button onClick={()=>onNavigate("legal",family.id)}>Договоры →</button>{canArchive?<button disabled={busy} onClick={()=>void archiveFamily(family)}>{family.status==="Архив"?"Восстановить":"В архив"}</button>:null}</div></footer></article>)}</div>{families.length<total?<div className="family-load-more"><button className="secondary-action" disabled={loadingMore} onClick={()=>void load(families.length)}>{loadingMore?"Загружаем…":`Показать ещё · ${families.length} из ${total}`}</button></div>:null}</>:null}
-    {network?<FamilyDetailCard detail={network} returnFocusTo={networkTriggerRef.current} close={()=>setNetwork(null)} edit={()=>{setNetwork(null);void edit(network.family.id)}} openIntegrations={()=>{setNetwork(null);onOpenIntegrations()}} navigate={onNavigate}/>:null}
+    {network?<FamilyDetailCard detail={network} returnFocusRef={networkTriggerRef} close={()=>setNetwork(null)} edit={()=>{setNetwork(null);void edit(network.family.id)}} openIntegrations={()=>{setNetwork(null);onOpenIntegrations()}} navigate={onNavigate}/>:null}
     {editor?<FamilyEditor detail={editor==="create"?null:editor} busy={busy} close={()=>setEditor(null)} submit={save}/>:null}
   </section>
 }
 
-export function FamilyDetailCard({detail,close,edit,navigate,openIntegrations,returnFocusTo}:{detail:FamilyDetail;returnFocusTo?:HTMLElement|null;close:()=>void;edit:()=>void;openIntegrations:()=>void;navigate:(module:"sales"|"legal"|"finance"|"education",focusId?:string)=>void}){
+export function FamilyDetailCard({detail,close,edit,navigate,openIntegrations,returnFocusRef}:{detail:FamilyDetail;returnFocusRef?:{current:HTMLElement|null};close:()=>void;edit:()=>void;openIntegrations:()=>void;navigate:(module:"sales"|"legal"|"finance"|"education",focusId?:string)=>void}){
   const [view,setView]=useState<"Обзор"|"Подробности"|"Связи">("Обзор");
   const dialogRef=useRef<HTMLElement>(null), closeRef=useRef(close);
   useEffect(()=>{closeRef.current=close},[close]);
   useEffect(()=>{
-    const previous=returnFocusTo??document.activeElement as HTMLElement|null, dialog=dialogRef.current;
+    const previous=returnFocusRef?.current??document.activeElement as HTMLElement|null, dialog=dialogRef.current;
     dialog?.focus();
     const keydown=(event:KeyboardEvent)=>{
       if(event.key==="Escape"){event.preventDefault();closeRef.current();return;}
@@ -71,7 +71,7 @@ export function FamilyDetailCard({detail,close,edit,navigate,openIntegrations,re
     };
     dialog?.addEventListener('keydown',keydown);
     return()=>{dialog?.removeEventListener('keydown',keydown);previous?.focus();};
-  },[returnFocusTo]);
+  },[returnFocusRef]);
   const profile=detail.family.profile,parents=detail.members.filter(member=>member.entityType==="Клиент"),children=detail.members.filter(member=>member.entityType==="Ребёнок"),contract=detail.relationship.contracts[0],accrualTotal=detail.relationship.accruals.reduce((sum,row)=>sum+row.amountMinor,0);
   const cardState=familyCardState(detail.family,{parentNames:parents.map(member=>member.displayName),hasDuplicate:detail.hasDuplicate});
   const navigateAway=(module:"sales"|"legal"|"finance"|"education",focusId?:string)=>{close();navigate(module,focusId);};
