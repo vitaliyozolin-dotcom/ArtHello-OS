@@ -12,11 +12,13 @@ const policyUrl = dataModule(stripTypeScriptTypes(readFileSync(resolve('lib/acce
 const integrationsUrl = dataModule(stripTypeScriptTypes(readFileSync(resolve('lib/integrations.ts'), 'utf8'), { mode: 'strip' }));
 const alfaImportUrl = dataModule(stripTypeScriptTypes(readFileSync(resolve('lib/alfacrm-import.ts'), 'utf8'), { mode: 'strip' }));
 const identityUrl = dataModule(stripTypeScriptTypes(readFileSync(resolve('lib/entity-identity.ts'), 'utf8'), { mode: 'strip' }));
-const identityDbUrl = dataModule(stripTypeScriptTypes(readFileSync(resolve('lib/entity-identity-db.ts'), 'utf8'), { mode: 'strip' }).replace("'./entity-identity.ts'", JSON.stringify(identityUrl)));
+const schoolOnlyUrl = dataModule(stripTypeScriptTypes(readFileSync(resolve('lib/atlas-school-source.ts'), 'utf8'), { mode: 'strip' }));
+const identityDbUrl = dataModule(stripTypeScriptTypes(readFileSync(resolve('lib/entity-identity-db.ts'), 'utf8'), { mode: 'strip' }).replace("'./entity-identity.ts'", JSON.stringify(identityUrl)).replace("'./atlas-school-source.ts'", JSON.stringify(schoolOnlyUrl)));
 const policy = await import(policyUrl);
 globalThis.__alfaCorrectness = { env: {}, actor: null, csrfValid: true, originValid: true };
 const harness = globalThis.__alfaCorrectness;
 const adapters = {
+  '../../../../lib/atlas-school-source': schoolOnlyUrl,
   '../../../../lib/education-conditions': dataModule(stripTypeScriptTypes(readFileSync(resolve('lib/education-conditions.ts'), 'utf8'), { mode: 'strip' })),
   'cloudflare:workers': dataModule('export const env=globalThis.__alfaCorrectness.env;'),
   '../../../../db': dataModule('export const ensureCoreTables=async()=>{}; export const readIntegrationCredential=async()=>JSON.stringify({email:"fixture@example.test",apiKey:"synthetic-key",appKey:""}); export const saveIntegrationCredential=async()=>{};'),

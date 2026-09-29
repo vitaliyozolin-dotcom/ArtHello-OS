@@ -7,7 +7,7 @@ type Issue = { code: string; reason: string; action: string; target: 'edit' | 's
 const sourceStatuses = new Set(['Активен', 'Активен ШКОЛА', 'Открыто', 'Разовое посещение', 'Запись', 'Пробное занятие', 'Завершил']);
 const unknownStatus = 'Статус в AlfaCRM не подтверждён';
 export function isSourceOwnedFamilyField(key: string) {
-  return /^alfa/i.test(key) || ['customerLifecycle','attendanceFormat','canonicalId','branchAssignments','identitySourceStatus','localArchive','remoteBranchId','localBranchId','sourceLocalBranchId','guardianName'].includes(key);
+  return /^alfa/i.test(key) || ['identitySourceScope','currentSourceBranchId','currentSourceEntityId','customerLifecycle','attendanceFormat','canonicalId','branchAssignments','identitySourceStatus','localArchive','remoteBranchId','localBranchId','sourceLocalBranchId','guardianName'].includes(key);
 }
 export function editableFamilyExtras(values: Record<string, unknown>) {
   // The editor round-trips hidden fields as text; only editable values may override stored metadata.

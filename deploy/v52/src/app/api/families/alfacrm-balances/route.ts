@@ -1,3 +1,4 @@
+import { readAtlasSchoolOnly, sourceCustomerAllowed } from '../../../../lib/atlas-school-source';
 import { env } from "cloudflare:workers";
 import { readIdentityIndex } from "../../../../lib/entity-identity-db";
 import { ensureCoreTables } from "../../../../db";
@@ -74,7 +75,8 @@ export async function GET(request: Request) {
       ORDER BY b.local_branch_id,b.remote_branch_id,b.customer_id`)
       .bind(...familyIds).all<BalanceRow>();
     const names = new Map(branchRows.results.map((row: { id: string; name: string }) => [row.id, row.name]));
-    const balances = rows.results.filter((row: BalanceRow) => mappings[row.remote_branch_id] === row.local_branch_id
+    const schoolOnly = await readAtlasSchoolOnly(db);
+    const balances = rows.results.filter((row: BalanceRow) => sourceCustomerAllowed(schoolOnly, row.remote_branch_id, row.customer_id) && mappings[row.remote_branch_id] === row.local_branch_id
       && (owner || scope.branchIds.has(row.local_branch_id)))
       .map((row: BalanceRow) => {
         const verified = row.source_field === "Customer.balance" && Number.isSafeInteger(row.balance_minor)

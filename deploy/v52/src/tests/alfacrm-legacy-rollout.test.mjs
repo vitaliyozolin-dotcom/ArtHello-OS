@@ -9,10 +9,12 @@ const dataModule = source => `data:text/javascript;base64,${Buffer.from(source).
 const nativeFetch = globalThis.fetch;
 const tsModule = path => dataModule(stripTypeScriptTypes(readFileSync(resolve(path), 'utf8'), { mode: 'transform' }));
 const identityUrl = tsModule('lib/entity-identity.ts');
-const identityDbUrl = dataModule(stripTypeScriptTypes(readFileSync(resolve('lib/entity-identity-db.ts'), 'utf8'), { mode: 'strip' }).replace("'./entity-identity.ts'", JSON.stringify(identityUrl)));
+const schoolOnlyUrl = dataModule(stripTypeScriptTypes(readFileSync(resolve('lib/atlas-school-source.ts'), 'utf8'), { mode: 'strip' }));
+const identityDbUrl = dataModule(stripTypeScriptTypes(readFileSync(resolve('lib/entity-identity-db.ts'), 'utf8'), { mode: 'strip' }).replace("'./entity-identity.ts'", JSON.stringify(identityUrl)).replace("'./atlas-school-source.ts'", JSON.stringify(schoolOnlyUrl)));
 const fixture = { env: {}, actor: null, secretReads: 0, secretWrites: 0, calls: [] };
 globalThis.__alfaLegacyRollout = fixture;
 const adapters = {
+  '../../../../lib/atlas-school-source': schoolOnlyUrl,
   '../../../../lib/education-conditions': tsModule('lib/education-conditions.ts'),
   'cloudflare:workers': dataModule('export const env=globalThis.__alfaLegacyRollout.env;'),
   '../../../../lib/entity-identity': identityUrl,
