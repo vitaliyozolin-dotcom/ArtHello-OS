@@ -161,6 +161,7 @@ class ReleaseTests(unittest.TestCase):
             nonlocal renamed,started
             calls.append(args)
             if args[0]=='rename': renamed=True
+            if args[:2]==('run','--rm') and args[-1]=='/maintenance/atlas_school_only.mjs': return b'ATLAS_SCHOOL_ONLY_RESULT={"schoolOnly":32,"historyUnchanged":true}\n'
             if args[:2]==('run','--rm'): return b'{"integrity":"ok"}'
             if args[:2]==('run','-d'): started=True
             if args[0]=='ps' and started: return b'candidate'
@@ -180,7 +181,7 @@ class ReleaseTests(unittest.TestCase):
                 release.upgrade(old,plan,Path(directory),'123-1',lambda:None)
         self.assertIn(('rm','-f',plan['name']),calls)
         self.assertIn(('start',plan['name']),calls)
-        self.assertEqual(sum(call[0]=='run' and call[1]=='--rm' for call in calls),1)
+        self.assertEqual(sum(call[0]=='run' and call[1]=='--rm' for call in calls),2)
 
 
     def test_stable_health_window_recovers_after_transient_database_busy(self):

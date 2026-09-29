@@ -1,3 +1,4 @@
+import { readAtlasSchoolOnly, sourceCustomerAllowed } from '../../../../lib/atlas-school-source';
 /* eslint-disable @next/next/no-assign-module-variable */
 import { env } from "cloudflare:workers";
 import { educationConditionKey, permitsEnrollment } from '../../../../lib/education-conditions';
@@ -183,11 +184,13 @@ async function previewCustomerPolicy(context: ImportContext) {
   if (!selected.length) return privateJson({ error: 'Сначала сопоставьте филиалы' }, 409);
   const session = await storedSession(state);
   const rows = [];
+  const schoolOnly = await readAtlasSchoolOnly(env.DB);
   let excludedLifecycle = 0;
   for (const branch of selected) {
     const dictionary = await fetchPaged(session, `${branch}/study-status/index`, {});
     const records = await fetchPaged(session, `${branch}/customer/index`, { is_study: 1, removed: 0, withGroups: true });
     for (const { record, statusName } of resolveCustomerStatuses(records, dictionary)) {
+      if (!sourceCustomerAllowed(schoolOnly, branch, scalar(record.id))) continue;
       const disposition = alfaBranchDisposition('families', { remoteBranchId: branch, item: record });
       if (disposition === 'inactive') { excludedLifecycle++; continue; }
       rows.push({ id: String(record.id ?? ''), branch, status: statusName, localBranch: familyLocalBranch(state, branch, record),
@@ -198,6 +201,7 @@ async function previewCustomerPolicy(context: ImportContext) {
   const stored = await env.DB.prepare("SELECT id,status,metadata FROM entities WHERE entity_type='Семья' AND source_system='ALFACRM'").all<{id:string;status:string;metadata:string}>();
   const existing = (stored.results ?? []).flatMap(row => {
     let metadata: JsonRecord; try { metadata = JSON.parse(row.metadata) as JsonRecord; } catch { return []; }
+    if (!sourceCustomerAllowed(schoolOnly, scalar(metadata.remoteBranchId), scalar(metadata.alfaCustomerId))) return [];
     return [{ id:row.id, status:row.status, remoteBranchId:scalar(metadata.remoteBranchId), customerId:scalar(metadata.alfaCustomerId), localBranchId:scalar(metadata.localBranchId), localArchive:metadata.localArchive===true }];
   });
   const comparison = rows.every(row => Array.isArray(row.branchIds)) && report.duplicates === 0
@@ -272,7 +276,8 @@ function alfaAutosyncSecret() {
 }
 
 async function alfaAutosyncScope(state: AlfaState) {
-  return hashText(JSON.stringify([ALFA_SCOPE_CONTRACT, CUSTOMER_POLICY_CONTRACT, state.endpoint, Object.entries(state.branchMappings).sort(), Object.entries(state.educationRouting ?? {}).sort(), state.remoteBranches.map(b => b.id).sort()]));
+  const schoolOnly = await readAtlasSchoolOnly(env.DB);
+  return hashText(JSON.stringify([ALFA_SCOPE_CONTRACT, CUSTOMER_POLICY_CONTRACT, schoolOnly?.customerIds ?? [], state.endpoint, Object.entries(state.branchMappings).sort(), Object.entries(state.educationRouting ?? {}).sort(), state.remoteBranches.map(b => b.id).sort()]));
 }
 
 async function storedScopeAudit() {
@@ -917,7 +922,9 @@ async function fetchModuleRecords(session: AlfaSession, module: ModuleKey, branc
       rows.push(...scoped.map(item => ({ remoteBranchId, item })));
     } else rows.push(...items.map((item) => ({ remoteBranchId, item })));
   }
-  return rows;
+  const schoolOnly = await readAtlasSchoolOnly(env.DB);
+  return rows.filter(row => !['families','finance'].includes(module) || sourceCustomerAllowed(schoolOnly, row.remoteBranchId,
+    scalar(module === 'families' ? row.item.id : row.item.customer_id ?? record(row.item.customer)?.id)));
 }
 
 function assertDeferralOwner(context: ImportContext, branch: string | undefined, approved?: ModuleState['deferredCustomer']) {
@@ -1563,6 +1570,7 @@ async function canonicalizeGroups(rows: FetchedRecord[], state: AlfaState, local
 
 async function syncMembershipsFromFamilyRaw(state: AlfaState, actor: string, deferredKey = state.modules.families.deferredCustomer?.key ?? '') {
   const identities = await readIdentityIndex(env.DB);
+  const schoolOnly = await readAtlasSchoolOnly(env.DB);
   const conditionRows = await env.DB.prepare("SELECT state_key,state_value FROM system_runtime_state WHERE state_key LIKE 'education_conditions:%'").all<{state_key:string;state_value:string}>();
   const conditions = new Map<string, unknown>();
   for (const row of conditionRows.results) { try { conditions.set(row.state_key, JSON.parse(row.state_value)); } catch { /* fail closed */ } }
@@ -1581,7 +1589,7 @@ async function syncMembershipsFromFamilyRaw(state: AlfaState, actor: string, def
     .all<{ remote_branch_id: string; record_id: string; payload: string }>();
   const statements = [];
   for (const row of rows.results ?? []) {
-    if (!state.branchMappings[row.remote_branch_id]) continue;
+    if (!state.branchMappings[row.remote_branch_id] || !sourceCustomerAllowed(schoolOnly, row.remote_branch_id, row.record_id)) continue;
     if (`${row.remote_branch_id}:${row.record_id}` === deferredKey) continue;
     let item: JsonRecord;
     try { item = JSON.parse(row.payload) as JsonRecord; } catch { continue; }
@@ -1611,6 +1619,7 @@ async function syncMembershipsFromFamilyRaw(state: AlfaState, actor: string, def
 }
 
 async function canonicalizeLessons(rows: FetchedRecord[], state: AlfaState, actor: string) {
+  const schoolOnly = await readAtlasSchoolOnly(env.DB);
   const groups = await env.DB.prepare("SELECT id,program_id FROM education_groups").all<{ id: string; program_id: string }>();
   const groupPrograms = new Map((groups.results ?? []).map((row: { id: string; program_id: string }) => [row.id, row.program_id]));
   const statements = [];
@@ -1629,7 +1638,7 @@ async function canonicalizeLessons(rows: FetchedRecord[], state: AlfaState, acto
       return ids;
     };
     const remoteGroupIds = readIds(item.group_ids, item.group_id ?? record(item.group)?.id) ?? [];
-    const customerIds = readIds(item.customer_ids, item.customer_id);
+    const customerIds = readIds(item.customer_ids, item.customer_id)?.filter(id => sourceCustomerAllowed(schoolOnly, remoteBranchId, id)) ?? null;
     const teacherIds = readIds(item.teacher_ids, item.teacher_id ?? record(item.teacher)?.id);
     const date = isoDate(item.date ?? item.lesson_date);
     const localBranchId = state.branchMappings[remoteBranchId] ?? "";
@@ -1792,11 +1801,12 @@ async function familyEntityMap(state: AlfaState) {
 }
 
 async function readImportedCustomers(remoteBranches: string[]) {
+  const schoolOnly = await readAtlasSchoolOnly(env.DB);
   const deferredKey = (await readState()).modules.families.deferredCustomer?.key;
   const rows = await env.DB.prepare("SELECT remote_branch_id,record_id FROM alfacrm_current_records WHERE module='families' AND active=1 ORDER BY remote_branch_id,record_id")
     .all<{ remote_branch_id: string; record_id: string }>();
   const selected = new Set(remoteBranches);
-  return (rows.results ?? []).flatMap((row: { remote_branch_id: string; record_id: string }) => selected.has(row.remote_branch_id) && `${row.remote_branch_id}:${row.record_id}` !== deferredKey
+  return (rows.results ?? []).flatMap((row: { remote_branch_id: string; record_id: string }) => selected.has(row.remote_branch_id) && sourceCustomerAllowed(schoolOnly, row.remote_branch_id, row.record_id) && `${row.remote_branch_id}:${row.record_id}` !== deferredKey
     ? [{ remoteBranchId: row.remote_branch_id, customerId: row.record_id }]
     : []);
 }

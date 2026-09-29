@@ -1,19 +1,20 @@
+import { readAtlasSchoolOnly, sourceCustomerAllowed, type AtlasSchoolOnly } from './atlas-school-source.ts';
 import { buildIdentityIndex, type IdentityMerge } from './entity-identity.ts';
 export type IdentityRecord = {
-  id: string; entityType: string; status: string; scope: string; metadata: string;
+  id: string; entityType: string; status: string; scope: string; metadata: string; displayName?: string;
 };
 export function identityMetadata(text: string): Record<string, unknown> {
   try { const value = JSON.parse(text); return value && typeof value === 'object' && !Array.isArray(value) ? value : {}; }
   catch { return {}; }
 }
 export async function readIdentityIndex(db: D1Database) {
-  const cards = (await db.prepare('SELECT id,entity_type AS entityType,status,scope,metadata FROM entities').all<IdentityRecord>()).results;
+  const cards = (await db.prepare('SELECT id,entity_type AS entityType,status,scope,metadata,display_name AS displayName FROM entities').all<IdentityRecord>()).results;
   const merges = (await db.prepare('SELECT survivor_id AS survivorId,duplicate_id AS duplicateId FROM entity_merges').all<IdentityMerge>()).results;
   return { cards, merges, ...buildIdentityIndex(cards, merges) };
 }
 
 /** Keep source cards and all historical references; project confirmed aliases into current education. */
-export function identityProjectionStatements(db: D1Database, cards: IdentityRecord[], merges: IdentityMerge[]) {
+export function identityProjectionStatements(db: D1Database, cards: IdentityRecord[], merges: IdentityMerge[], schoolOnly: AtlasSchoolOnly | null = null) {
   const index = buildIdentityIndex(cards, merges);
   const byId = new Map(cards.map(card => [card.id, card]));
   const statements: D1PreparedStatement[] = [];
@@ -23,13 +24,20 @@ export function identityProjectionStatements(db: D1Database, cards: IdentityReco
     const localArchive = root.entityType === 'Семья' && ids.some(id => identityMetadata(byId.get(id)!.metadata).localArchive === true);
     const branches = ids.map(id => {
       const card = byId.get(id)!; const meta = identityMetadata(card.metadata);
-      return { sourceEntityId: id, scope: card.scope, localBranchId: meta.localBranchId ?? '',
+      return { sourceEntityId: id, scope: meta.identitySourceScope ?? card.scope, localBranchId: meta.localBranchId ?? '',
         remoteBranchId: meta.remoteBranchId ?? '',
         customerLifecycle: meta.customerLifecycle ?? null, alfaStatusName: meta.alfaStatusName ?? null,
         attendanceFormat: meta.attendanceFormat ?? null,
-        active: !localArchive && meta.localArchive !== true && (meta.identitySourceStatus ?? card.status) === 'Активна' };
+        active: sourceCustomerAllowed(schoolOnly, String(meta.remoteBranchId ?? ''), String(meta.alfaCustomerId ?? '')) && !localArchive && meta.localArchive !== true && (meta.identitySourceStatus ?? card.status) === 'Активна' };
     });
     const meta = identityMetadata(root.metadata);
+    const school = schoolOnly?.customerIds.includes(String(meta.alfaCustomerId ?? ''))
+      ? ids.map(id => byId.get(id)!).find(card => String(identityMetadata(card.metadata).remoteBranchId) === '10') : undefined;
+    if (school) {
+      const source = identityMetadata(school.metadata);
+      const preserved = Object.fromEntries(['remoteBranchId','localBranchId','sourceLocalBranchId','alfaCustomerId','alfaSource','identitySourceStatus','localArchive'].filter(key => key in meta).map(key => [key, meta[key]]));
+      statements.push(db.prepare('UPDATE entities SET display_name=?,scope=?,metadata=? WHERE id=?').bind(school.displayName ?? '', school.scope, JSON.stringify({...meta,...source,...preserved,identitySourceScope:meta.identitySourceScope ?? root.scope,currentSourceBranchId:'10',currentSourceEntityId:school.id}),root.id));
+    }
     const status = localArchive || meta.localArchive === true ? 'Архив' : branches.some(branch => branch.active) ? 'Активна' : 'Архив';
     statements.push(db.prepare("UPDATE entities SET status=?,metadata=json_set(metadata,'$.canonicalId',?,'$.branchAssignments',json(?)),updated_at=CURRENT_TIMESTAMP WHERE id=?")
       .bind(status, root.id, JSON.stringify(branches), root.id));
@@ -62,7 +70,7 @@ export function identityProjectionStatements(db: D1Database, cards: IdentityReco
 }
 export async function refreshIdentityProjections(db: D1Database) {
   const { cards, merges } = await readIdentityIndex(db);
-  if (merges.length) await db.batch(identityProjectionStatements(db, cards, merges));
+  if (merges.length) await db.batch(identityProjectionStatements(db, cards, merges, await readAtlasSchoolOnly(db)));
 }
 
 /** Existing directory grants still carry source IDs; never silently rekey their principals. */

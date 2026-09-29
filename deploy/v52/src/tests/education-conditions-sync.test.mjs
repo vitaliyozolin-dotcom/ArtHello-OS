@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 import { stripTypeScriptTypes } from 'node:module';
 import { DatabaseSync } from 'node:sqlite';
 import { educationConditionKey,makeEducationCondition,permitsEnrollment } from '../lib/education-conditions.ts';
+import { readAtlasSchoolOnly, sourceCustomerAllowed } from '../lib/atlas-school-source.ts';
 const route=readFileSync(new URL('../app/api/integrations/alfacrm/route.ts',import.meta.url),'utf8');
 const source=stripTypeScriptTypes(route.slice(route.indexOf('async function syncMembershipsFromFamilyRaw('),route.indexOf('async function canonicalizeLessons(')));
 test('real membership projector preserves exempt enrollment across repeated imports without enrolling other open records',async()=>{
@@ -20,9 +21,9 @@ test('real membership projector preserves exempt enrollment across repeated impo
   }
   const condition=makeEducationCondition({childId:'CHD-A-8:101',remoteBranchId:'8',enabled:true,actor:'owner-test',now:'2026-09-29T00:00:00Z'});
   sql.prepare('INSERT INTO system_runtime_state VALUES(?,?)').run(educationConditionKey(condition.childId,'8'),JSON.stringify(condition));
-  const prepare=(query,args=[])=>({bind:(...values)=>prepare(query,values),all:async()=>({results:sql.prepare(query).all(...args)}),run:()=>sql.prepare(query).run(...args)});
+  const prepare=(query,args=[])=>({bind:(...values)=>prepare(query,values),first:async()=>sql.prepare(query).get(...args),all:async()=>({results:sql.prepare(query).all(...args)}),run:()=>sql.prepare(query).run(...args)});
   const db={prepare,batch:async statements=>statements.map(statement=>statement.run())};
-  const deps={env:{DB:db},readIdentityIndex:async()=>({cards,canonical:id=>id}),educationConditionKey,permitsEnrollment,shortHash:async value=>value,runBatches:async statements=>db.batch(statements),alfaBranchDisposition:()=> 'accepted',scalar:value=>String(value??''),groupIds:item=>item.group_ids,localGroupId:async()=> 'G-1',lineageStatement:()=>prepare("INSERT INTO proof_events VALUES('lineage')"),auditStatement:()=>prepare("INSERT INTO proof_events VALUES('audit')")};
+  const deps={readAtlasSchoolOnly,sourceCustomerAllowed,env:{DB:db},readIdentityIndex:async()=>({cards,canonical:id=>id}),educationConditionKey,permitsEnrollment,shortHash:async value=>value,runBatches:async statements=>db.batch(statements),alfaBranchDisposition:()=> 'accepted',scalar:value=>String(value??''),groupIds:item=>item.group_ids,localGroupId:async()=> 'G-1',lineageStatement:()=>prepare("INSERT INTO proof_events VALUES('lineage')"),auditStatement:()=>prepare("INSERT INTO proof_events VALUES('audit')")};
   const sync=new Function(...Object.keys(deps),`${source}\nreturn syncMembershipsFromFamilyRaw;`)(...Object.values(deps));
   const state={branchMappings:{'8':'BR-SCHOOL'},modules:{families:{}}};
   for(let pass=0;pass<2;pass++){

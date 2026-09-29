@@ -162,6 +162,10 @@ PINS = {
 
 # Exact verified D194 #75 receipt; do not accept a label without its container and image.
 CENTRAL_PREDECESSORS = {
+    # Protected release #123, run 36623049417; independently audited by #124.
+    ('c8ff2621025940d0c30547cbdccb107cf827afcc',
+     'a1b279e27e9e4405c9c905bfad767bd5fd63344f54a4f8affc35e419b4831330',
+     'sha256:1302e619640ece623bc17c6b93a484772536a70cd4d69b0cabe375e97f38d76b'),
     # Protected release #122, run 36619170501; verified runtime receipt.
     ('5380eea5627805ddeeb2ce77ca11b24dec083607',
      'aa6bbd0c8e72ea7ab4afcfde0f2032b0c0ed5b01d20003bae079ef865d4abe13',
@@ -430,6 +434,17 @@ def upgrade(old, plan, work, run_key, current_main):
         backup_receipt = json.loads(output)
         require(backup_receipt['integrity'] == 'ok', 'BACKUP')
         current_main()
+        if system == 'central':
+            checkpoint('apply-fixed-atlas-school-roster')
+            transfer_output = docker('run', '--rm', '--network', 'none', '--read-only', '--user', '1000:1000',
+                '--security-opt', 'no-new-privileges:true', '--pids-limit', '32', '--memory', '512m',
+                '--mount', 'type=volume,src=' + plan['dataVolume'] + ',dst=/data,volume-nocopy',
+                '--mount', 'type=bind,src=' + str(ROOT / 'deploy') + ',dst=/maintenance,readonly',
+                '--env', 'ATLAS_SCHOOL_ONLY_WRITER_STOPPED=1', '--entrypoint', 'node', plan['image'],
+                '/maintenance/atlas_school_only.mjs', timeout=300)
+            transfer_reports = [json.loads(line.split('=', 1)[1]) for line in transfer_output.decode().splitlines() if line.startswith('ATLAS_SCHOOL_ONLY_RESULT=')]
+            require(len(transfer_reports) == 1 and transfer_reports[0].get('schoolOnly') == 32 and transfer_reports[0].get('historyUnchanged') is True, 'ATLAS_SCHOOL_ONLY_UNCONFIRMED')
+            print('ATLAS_SCHOOL_ONLY_RESULT=' + json.dumps(transfer_reports[0]), flush=True)
         renamed = True
         record('replacing-runtime')
         checkpoint('replace-runtime-preserve-data')

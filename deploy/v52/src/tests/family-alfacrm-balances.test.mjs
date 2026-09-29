@@ -20,7 +20,8 @@ function compile(relative, output, replacements = {}) {
   writeFileSync(join(temp, output), result.outputText);
 }
 compile("../lib/entity-identity.ts", "identity.mjs");
-compile("../lib/entity-identity-db.ts", "identity-db.mjs", { "'./entity-identity.ts'": '"./identity.mjs"' });
+compile("../lib/atlas-school-source.ts", "school-only.mjs");
+compile("../lib/entity-identity-db.ts", "identity-db.mjs", { "'./entity-identity.ts'": '"./identity.mjs"', "'./atlas-school-source.ts'": '"./school-only.mjs"' });
 compile("../lib/access-policy.ts", "policy.mjs");
 compile("../lib/section-read-scope.ts", "scope.mjs", { '"./access-policy.ts"': '"./policy.mjs"' });
 writeFileSync(join(temp, "env.mjs"), "export const env={get DB(){return globalThis.__familyAlfaTest.db}};");
@@ -28,6 +29,7 @@ writeFileSync(join(temp, "db.mjs"), "export async function ensureCoreTables(){};
 writeFileSync(join(temp, "auth.mjs"), `export async function getAuthenticatedRequestContext(){if(globalThis.__familyAlfaTest.authError)throw Error('private auth detail');return globalThis.__familyAlfaTest.context;}
 export function isCanonicalOwnerContext(context){return context.canonicalOwner===true;}`);
 compile("../app/api/families/alfacrm-balances/route.ts", "route.mjs", {
+  "'../../../../lib/atlas-school-source'": '"./school-only.mjs"',
   '"cloudflare:workers"': '"./env.mjs"', '"../../../../db"': '"./db.mjs"',
   '"../../../../lib/access-policy"': '"./policy.mjs"', '"../../../../lib/production-auth"': '"./auth.mjs"',
   '"../../../../lib/entity-identity-db"': '"./identity-db.mjs"',
@@ -54,6 +56,7 @@ function fixture(t, ctx = context()) {
   sqlite.exec(`CREATE TABLE entities(id TEXT PRIMARY KEY,entity_type TEXT,scope TEXT,metadata TEXT);
     INSERT INTO entities VALUES ('F-A','Семья','School','{"localBranchId":"A"}'),('F-B','Семья','Nebo','{"localBranchId":"B"}'),('F-X','Семья','Closed','{"localBranchId":"X"}'),('CH-A','Ребёнок','School','{}');
     ALTER TABLE entities ADD COLUMN status TEXT DEFAULT 'Активна';
+    ALTER TABLE entities ADD COLUMN display_name TEXT DEFAULT 'Fixture';
     CREATE TABLE entity_merges(survivor_id TEXT,duplicate_id TEXT);
     CREATE TABLE organization_branches(id TEXT PRIMARY KEY,name TEXT,status TEXT,sort_order INTEGER);
     INSERT INTO organization_branches VALUES ('A','School','Активен',1),('B','Nebo','Активен',2),('X','Closed','Архив',3);

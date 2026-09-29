@@ -23,9 +23,45 @@ d = release.docker
 assert not d('volume','ls','-q','--filter','name=^'+data+'$').strip()
 script = """
 const {DatabaseSync}=require('node:sqlite');
-const db=new DatabaseSync('/data/app.sqlite');
-db.exec('CREATE TABLE IF NOT EXISTS alfacrm_import_records(id TEXT); CREATE TABLE IF NOT EXISTS system_runtime_state(state_key TEXT PRIMARY KEY,state_value TEXT);');
-db.prepare('INSERT OR IGNORE INTO system_runtime_state VALUES (?,?)').run('alfacrm_connector:v1',JSON.stringify({connected:true,autosync:{enabled:false}}));
+const fs=require('node:fs');
+fs.mkdirSync('/data/d1',{recursive:true});
+function fixture(count=32) {
+  const db=new DatabaseSync('/data/d1/app.sqlite');
+  db.exec(`
+    CREATE TABLE system_runtime_state(state_key TEXT PRIMARY KEY,state_value TEXT NOT NULL,updated_at TEXT);
+    CREATE TABLE organization_branches(id TEXT); CREATE TABLE alfacrm_import_records(id TEXT); CREATE TABLE entities(id TEXT PRIMARY KEY,entity_type TEXT,display_name TEXT,status TEXT,source_system TEXT,source_record_id TEXT,data_quality TEXT,scope TEXT,metadata TEXT,created_by TEXT,created_at TEXT,updated_at TEXT);
+    CREATE TABLE entity_merges(survivor_id TEXT,duplicate_id TEXT);
+    CREATE TABLE entity_links(from_entity_id TEXT,to_entity_id TEXT,relation_type TEXT);
+    CREATE TABLE education_students(id TEXT PRIMARY KEY,child_entity_id TEXT,family_entity_id TEXT,group_id TEXT,status TEXT);
+    CREATE TABLE education_groups(id TEXT PRIMARY KEY,unit_entity_id TEXT);
+    CREATE TABLE audit_events(actor TEXT,action TEXT,entity_type TEXT,entity_id TEXT,payload TEXT);
+    CREATE TABLE alfacrm_raw_observations(id TEXT PRIMARY KEY,payload TEXT);
+    CREATE TABLE alfacrm_current_records(remote_branch_id TEXT,module TEXT,record_id TEXT,observation_id TEXT,active INTEGER);
+    CREATE TABLE alfacrm_customer_balances(customer_id TEXT,remote_branch_id TEXT,balance_minor INTEGER);
+    CREATE TABLE financial_operations(id TEXT PRIMARY KEY,amount_minor INTEGER);
+  `);
+  db.prepare('INSERT INTO system_runtime_state VALUES(?,?,?)').run('alfacrm_connector:v1',JSON.stringify({connected:true,autosync:{enabled:false},endpoint:'https://arthellonew.s20.online',branchMappings:{'6':'BR-KINDERGARTEN','10':'BR-ATLAS-SCHOOL'}}),'');
+  db.exec("INSERT INTO education_groups VALUES('garden','BR-KINDERGARTEN'),('school','BR-ATLAS-SCHOOL'); INSERT INTO financial_operations VALUES('old',12345);");
+  for(let n=1;n<=count;n++) add(db,n);
+  return db;
+}
+function add(db,n) {
+  for(const branch of ['6','10']) {
+    const scope=branch==='6'?'Атлас — садик':'Атлас — школа', id=String(n), source=branch+':'+id;
+    db.prepare('INSERT INTO alfacrm_raw_observations VALUES(?,?)').run(source,JSON.stringify({id,branch_ids:[6,10]}));
+    db.prepare('INSERT INTO alfacrm_current_records VALUES(?,?,?,?,1)').run(branch,'families',id,source);
+    db.prepare('INSERT INTO alfacrm_customer_balances VALUES(?,?,?)').run(id,branch,n*100);
+    for(const kind of ['Семья','Ребёнок','Клиент']) {
+      const card=kind+':'+source, root=kind+':6:'+id;
+      db.prepare('INSERT INTO entities VALUES(?,?,?,?,?,?,?,?,?,?,?,?)').run(card,kind,'name'+id,branch==='6'?'Активна':'Объединена','ALFACRM',source,'Проверено',scope,JSON.stringify({remoteBranchId:branch,localBranchId:branch==='6'?'BR-KINDERGARTEN':'BR-ATLAS-SCHOOL',alfaCustomerId:id,identitySourceStatus:'Активна',alfaStatusName:'Активен'}),'owner','','');
+      if(branch==='10') db.prepare('INSERT INTO entity_merges VALUES(?,?)').run(root,card);
+    }
+  }
+  for(const group of ['garden','school']) db.prepare('INSERT INTO education_students VALUES(?,?,?,?,?)').run(group+n,'Ребёнок:6:'+n,'Семья:6:'+n,group,'Активен');
+}
+
+if (!fs.existsSync('/data/d1/app.sqlite')) fixture().close();
+fs.chownSync('/data/d1',1000,1000); fs.chownSync('/data/d1/app.sqlite',1000,1000);
 require('node:http').createServer((q,r)=>{r.setHeader('content-type','application/json');r.end(JSON.stringify({status:'ok'}));}).listen(8081,'127.0.0.1');
 """
 try:
