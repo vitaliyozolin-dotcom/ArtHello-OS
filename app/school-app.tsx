@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type FormEvent, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { Icon, type IconName } from "./icons";
+import { splitTeacherDirectory } from "./teacher-directory";
 import { roleLabels, type ActionKind, type Role, type SchoolSnapshot } from "./level-zero-types";
 
 type View = "home" | "calendar" | "schedule" | "programs" | "journal" | "homework" | "people" | "school" | "messages" | "management" | "profile";
@@ -476,8 +477,9 @@ const staffStatusMeta: Record<string, { label: string; tone: "good" | "warn" | "
   demo: { label: "Служебный", tone: "neutral" },
 };
 
-function StaffDirectory({ snapshot }: { snapshot: SchoolSnapshot }) {
-  const teachers = snapshot.users.filter((user) => user.role === "teacher" && user.status !== "archived" && user.profileStatus !== "demo");
+function StaffDirectory({ snapshot, pending = false }: { snapshot: SchoolSnapshot; pending?: boolean }) {
+  const directory = splitTeacherDirectory(snapshot);
+  const teachers = pending ? directory.pending : directory.teachers;
   return <div className="staff-directory">{teachers.map((teacher) => {
     const assignments = snapshot.teacherAssignments.filter((item) => item.teacherUserId === teacher.id);
     const classes = [...new Set(assignments.map((item) => item.className))].sort((a, b) => Number(a) - Number(b));
@@ -878,20 +880,20 @@ function StudentProfile({ student, snapshot, close }: { student: SchoolSnapshot[
 
 function PeoplePage({ snapshot }: { snapshot: SchoolSnapshot }) {
   const operational = snapshot.viewer.role === "director" || snapshot.viewer.role === "deputy" || snapshot.viewer.role === "admin";
-  const [directoryTab, setDirectoryTab] = useState<"students" | "classes" | "teachers">("students");
+  const [directoryTab, setDirectoryTab] = useState<"students" | "classes" | "teachers" | "imports">("students");
   const [classFilter, setClassFilter] = useState<string>("all");
   const [selectedStudentId, setSelectedStudentId] = useState<string | null>(null);
   if (!operational) {
     return <div className="page-shell"><div className="page-heading"><div><span className="eyebrow">{snapshot.viewer.role === "teacher" ? "Назначенные классы" : "Семья"}</span><h1>{snapshot.viewer.role === "teacher" ? "Мои классы и ученики" : "Мои дети"}</h1><p>Только разрешённые карточки без доступа к чужим данным</p></div></div><section className="student-directory">{snapshot.students.map((student) => <button key={student.id} onClick={() => setSelectedStudentId(student.id)}><Avatar name={student.fullName} color={student.avatarColor} size="lg" /><span><strong>{student.fullName}</strong><small>{student.className} класс · средний балл {weightedAverage(snapshot.grades.filter((grade) => grade.studentId === student.id))}</small></span><Icon name="chevron" /></button>)}</section>{snapshot.rankings.mode !== "none" ? <RankingBoard snapshot={snapshot} /> : null}{!snapshot.students.length ? <EmptyState title="Нет доступных карточек" text="Связь с ребёнком или классом должен подтвердить администратор школы." icon="users" /> : null}{selectedStudentId && snapshot.students.some((student) => student.id === selectedStudentId) ? <StudentProfile student={snapshot.students.find((student) => student.id === selectedStudentId)!} snapshot={snapshot} close={() => setSelectedStudentId(null)} /> : null}</div>;
   }
-  const teachers = snapshot.users.filter((user) => user.role === "teacher" && user.status !== "archived" && user.profileStatus !== "demo");
-  const unresolved = teachers.filter((user) => user.profileStatus !== "confirmed");
+  const { teachers, pending } = splitTeacherDirectory(snapshot);
+  const unresolved = [...teachers, ...pending].filter((user) => user.profileStatus !== "confirmed");
   const filteredStudents = classFilter === "all" ? snapshot.students : snapshot.students.filter((student) => student.className === classFilter);
   const selectedStudent = snapshot.students.find((student) => student.id === selectedStudentId) ?? null;
   return <div className="page-shell">
     <div className="page-heading"><div><span className="eyebrow">Единые карточки ArtHello OS</span><h1>Люди, классы и семьи</h1><p>Ученики разнесены по классам; состав класса виден без перехода в другие разделы</p></div><StatusPill tone="good">Источник: ArtHello OS</StatusPill></div>
     <section className="metric-grid"><MetricCard label="Классы" value={String(snapshot.classes.length)} caption="центральная проекция" icon="school" /><MetricCard label="Ученики" value={String(snapshot.students.length)} caption="центральные карточки" icon="users" tone="blue" /><MetricCard label="Педагоги" value={String(teachers.length)} caption="в матрице" icon="user" tone="violet" /><MetricCard label="Требуют решения" value={String(unresolved.length)} caption="вакансии и уточнения" icon="info" tone="amber" /></section>
-    <Tabs id="people-directory" value={directoryTab} options={[{ id: "students", label: `Ученики · ${snapshot.students.length}` }, { id: "classes", label: `Классы · ${snapshot.classes.length}` }, { id: "teachers", label: `Педагоги · ${teachers.length}` }]} onChange={(value) => { setDirectoryTab(value); setSelectedStudentId(null); }} ariaLabel="Люди и классы" className="tab-row compact-tabs" />
+    <Tabs id="people-directory" value={directoryTab} options={[{ id: "students", label: `Ученики · ${snapshot.students.length}` }, { id: "classes", label: `Классы · ${snapshot.classes.length}` }, { id: "teachers", label: `Педагоги · ${teachers.length}` }, { id: "imports", label: `Из ОС · ${pending.length}` }]} onChange={(value) => { setDirectoryTab(value); setSelectedStudentId(null); }} ariaLabel="Люди и классы" className="tab-row compact-tabs" />
     <TabPanel tabsId="people-directory" value={directoryTab}>
       {directoryTab === "students" ? <section className="content-card">
         <SectionTitle title="Ученики" subtitle={classFilter === "all" ? `Все ученики · ${snapshot.students.length}` : `${classFilter} класс · ${filteredStudents.length} учеников`} />
@@ -900,7 +902,8 @@ function PeoplePage({ snapshot }: { snapshot: SchoolSnapshot }) {
         {!filteredStudents.length ? <EmptyState title="В классе пока нет учеников" text="Проверьте привязку учеников к классу в центральном реестре." icon="users" /> : null}
       </section> : null}
       {directoryTab === "classes" ? <section className="content-card"><SectionTitle title="Классы" subtitle="Откройте класс, чтобы сразу увидеть его учеников" /><div className="class-grid">{snapshot.classes.map((schoolClass) => { const count = snapshot.students.filter((student) => student.className === schoolClass.name).length; return <button className="class-card" key={schoolClass.id} onClick={() => { setClassFilter(schoolClass.name); setDirectoryTab("students"); }}><span>{schoolClass.grade}</span><div><strong>{schoolClass.name} класс</strong><small>{schoolClass.homeroomTeacherName ?? "Классный руководитель не назначен"}</small></div><b>{count}</b></button>; })}</div></section> : null}
-      {directoryTab === "teachers" ? <section className="content-card"><SectionTitle title="Педагогический состав" subtitle={`${unresolved.length} позиций требуют решения`} /><StaffDirectory snapshot={snapshot} /></section> : null}
+      {directoryTab === "teachers" ? <section className="content-card"><SectionTitle title="Педагогический состав" subtitle="Карточки педагогов с сохранёнными назначениями" /><StaffDirectory snapshot={snapshot} /></section> : null}
+      {directoryTab === "imports" ? <section className="content-card"><SectionTitle title="Неподтверждённые записи из ОС" subtitle="Эти записи пока не входят в педагогический состав" /><div className="form-explainer"><Icon name="info" /><p><strong>Это записи импорта, а не вторые учителя.</strong><span>Совпадение ФИО не подтверждает личность. Записи и история сохранены; автоматического объединения и выдачи доступа нет.</span></p></div>{pending.length ? <StaffDirectory snapshot={snapshot} pending /> : <EmptyState title="Нет неподтверждённых записей импорта" text="Рабочие карточки находятся во вкладке «Педагоги»." icon="users" />}</section> : null}
     </TabPanel>
     {selectedStudent ? <StudentProfile student={selectedStudent} snapshot={snapshot} close={() => setSelectedStudentId(null)} /> : null}
   </div>;
