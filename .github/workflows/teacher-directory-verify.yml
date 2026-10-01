@@ -1,0 +1,112 @@
+name: Verify teacher directory correction
+on:
+  push:
+    branches: [fix/school-teacher-directory-20261001]
+    paths: [.github/workflows/teacher-directory-verify.yml]
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: teacher-directory-verify-20261001
+  cancel-in-progress: false
+env:
+  CONTROLLER_SHA: 5b2879e90c711361d74f74b65c816466b73d8d55
+  DIARY_SHA: 3f703702c232c7e6b8281102d0ba1fdca5c4fc3a
+  DIARY_TREE: 706b9c23f47edd8101a72769c17798ae31070a70
+jobs:
+  verify-build:
+    if: github.repository == 'vitaliyozolin-dotcom/ArtHello-OS' && github.actor == 'vitaliyozolin-dotcom' && github.run_attempt == 1
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ env.DIARY_SHA }}
+          path: diary
+          persist-credentials: false
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ env.CONTROLLER_SHA }}
+          path: controller
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 24
+      - name: Verify exact source and directory behavior
+        run: |
+          set -Eeuo pipefail
+          test "$(git -C diary rev-parse HEAD)" = "$DIARY_SHA"
+          test "$(git -C diary rev-parse HEAD^{tree})" = "$DIARY_TREE"
+          test "$(git -C controller rev-parse HEAD)" = "$CONTROLLER_SHA"
+          cd diary
+          node --experimental-strip-types --test tests/teacher-directory.test.mjs tests/directory-snapshot.test.mjs tests/central-family-directory.test.mjs
+          git diff --check
+      - name: Build immutable candidate outside production
+        run: |
+          set -Eeuo pipefail
+          docker build --build-arg NEXT_PUBLIC_SCHOOL_DESIGN_V1=true --label "org.opencontainers.image.revision=$DIARY_SHA" --label "org.opencontainers.image.source-tree=$DIARY_TREE" -t "school-teacher-directory:$DIARY_SHA" diary
+          test "$(git -C diary rev-parse HEAD^{tree})" = "$DIARY_TREE"
+      - name: Exercise isolated runtime and preserve artifact
+        run: |
+          set -Eeuo pipefail
+          name="teacher-directory-ci-$GITHUB_RUN_ID"
+          trap 'docker rm -f "$name" >/dev/null 2>&1 || true' EXIT
+          key="$(node -e "process.stdout.write('s'.repeat(40))")"
+          docker run -d --name "$name" --network none --read-only --tmpfs /tmp:rw,uid=1001,gid=1001 --tmpfs /data:rw,uid=1001,gid=1001 --tmpfs /backups:rw,uid=1001,gid=1001 --entrypoint node -e DATABASE_PATH=/data/isolated-ci.sqlite -e PUBLIC_APP_ORIGIN=http://127.0.0.1:3000 -e ARTHELLO_PUBLIC_ORIGIN=https://central.test -e CENTRAL_ACCESS_SECRET="$key" -e PASSWORDLESS_PEPPER="$key" -e SMOKE_SYSTEM_ID=SYS-SCHOOL-1-11 -e SMOKE_BRANCH_ID=BR-SCHOOL --mount "type=bind,src=$GITHUB_WORKSPACE/controller/deploy/diary-directory-smoke.mjs,dst=/run/directory-smoke.mjs,readonly" "school-teacher-directory:$DIARY_SHA" server.js
+          ready=0
+          for attempt in $(seq 1 45); do
+            if docker exec "$name" node -e "fetch('http://127.0.0.1:3000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"; then ready=1; break; fi
+            sleep 2
+          done
+          test "$ready" = 1
+          docker exec "$name" node /run/directory-smoke.mjs
+          mkdir -p proof
+          docker save "school-teacher-directory:$DIARY_SHA" | gzip -1 -n > proof/image.tar.gz
+          fingerprint="$(docker image inspect "school-teacher-directory:$DIARY_SHA" | jq -cS -f controller/deploy/v52/maintenance/image-runtime-fingerprint.jq | sha256sum | cut -d ' ' -f 1)"
+          jq -n --arg source "$DIARY_SHA" --arg tree "$DIARY_TREE" --arg controller "$CONTROLLER_SHA" --arg fingerprint "$fingerprint" --arg run "$GITHUB_RUN_ID" '{schemaVersion:1,sourceSha:$source,sourceTree:$tree,controllerSha:$controller,diary:"school",runtimeFingerprintSha256:$fingerprint,runId:$run,isolatedDirectorySmoke:"verified",productionApplied:false}' > proof/receipt.json
+          (cd proof && sha256sum image.tar.gz receipt.json > checksums.sha256)
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: school-teacher-directory-${{ github.run_id }}
+          path: proof/
+          retention-days: 7
+          if-no-files-found: error
+  read-only-inventory:
+    if: github.repository == 'vitaliyozolin-dotcom/ArtHello-OS' && github.actor == 'vitaliyozolin-dotcom' && github.run_attempt == 1
+    runs-on: [self-hosted, linux, x64, arthello-gateway]
+    environment: production-ru
+    concurrency:
+      group: gateway-38-55-arthello-production
+      cancel-in-progress: false
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ env.CONTROLLER_SHA }}
+          path: teacher-audit-${{ github.run_id }}
+          persist-credentials: false
+      - name: Observe school through existing pinned SSH boundary without mutations
+        working-directory: teacher-audit-${{ github.run_id }}
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.ARTHELLO_RU_SSH_PRIVATE_KEY }}
+          SSH_KNOWN_HOSTS: ${{ secrets.ARTHELLO_RU_SSH_KNOWN_HOSTS }}
+          DEPLOY_HOST: ${{ secrets.ARTHELLO_RU_DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.ARTHELLO_RU_DEPLOY_USER }}
+          DEPLOY_PORT: ${{ secrets.ARTHELLO_RU_DEPLOY_PORT }}
+        run: |
+          set -Eeuo pipefail
+          test "$(git rev-parse HEAD)" = "$CONTROLLER_SHA"
+          python3 - <<'PY'
+          import importlib.util,json
+          from pathlib import Path
+          p=Path('deploy/alfa_audit.py').resolve()
+          s=importlib.util.spec_from_file_location('audit',p)
+          audit=importlib.util.module_from_spec(s);s.loader.exec_module(audit)
+          with audit.school_connection() as (execute,inventory):
+              print('SCHOOL_READONLY_INVENTORY='+json.dumps(inventory))
+              if inventory.get('status')!='verified': raise RuntimeError('SCHOOL_IDENTITY_UNCONFIRMED')
+              cid=inventory['applicationContainerId']
+              output=execute('docker exec -i '+cid+' node --input-type=module -',data=Path('deploy/diary-data-audit.mjs').read_bytes())
+              print(output.decode())
+          print('PRODUCTION_CHANGED=false')
+          PY
