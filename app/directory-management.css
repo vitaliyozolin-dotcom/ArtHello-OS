@@ -1,0 +1,21 @@
+.directory-management { display: grid; gap: var(--space-4); min-width: 0; }
+.directory-heading h2,.directory-editor h2 { margin: 0; }
+.directory-heading p,.directory-management p { color: var(--neutral-500); }
+.directory-tabs,.directory-toolbar,.directory-actions { display:flex; flex-wrap:wrap; align-items:center; gap:var(--space-2); }
+.directory-toolbar { align-items:end; }
+.directory-toolbar label,.directory-editor label { display:grid; gap:var(--space-2); min-width:0; flex:1; }
+.directory-management input,.directory-management select,.directory-toolbar input { min-height:var(--control-height-md); padding:var(--space-2) var(--space-3); border:1px solid var(--neutral-200); border-radius:var(--radius-sm); background:var(--neutral-0); color:var(--neutral-900); font:inherit; width:100%; min-width:0; }
+.directory-list { display:grid; gap:var(--space-2); }
+.directory-list article { display:flex; flex-wrap:wrap; justify-content:space-between; align-items:center; gap:var(--space-3); border-bottom:1px solid var(--neutral-200); padding-block:var(--space-3); }
+.directory-list article > div:first-child { min-width:0; flex:1; }
+.directory-list strong,.directory-list small { display:block; overflow-wrap:anywhere; }
+.directory-list small { color:var(--neutral-500); margin-top:var(--space-1); }
+.directory-list article > span { overflow-wrap:anywhere; max-width:100%; }
+.directory-error { color:var(--error-600, var(--neutral-900)); }
+.directory-editor { display:grid; gap:var(--space-4); padding:var(--space-6); max-height:90dvh; overflow:auto; }
+.directory-editor footer { justify-content:flex-end; }
+.directory-control-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,220px),1fr)); gap:var(--space-3); }
+.directory-control-grid a { display:grid; gap:var(--space-2); padding:var(--space-4); border:1px solid var(--neutral-200); border-radius:var(--radius-md); color:inherit; text-decoration:none; background:var(--neutral-0); }
+.directory-control-grid a:hover { border-color:var(--brand-500); }
+.directory-control-grid small { color:var(--neutral-500); }
+@media(max-width:767px) { .directory-toolbar { flex-direction:column; align-items:stretch; } .directory-tabs > button { flex:1; } .directory-editor { padding:var(--space-4); } }

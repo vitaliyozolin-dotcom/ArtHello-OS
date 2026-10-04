@@ -49,6 +49,10 @@ export class PreparedQuery {
 export class SchoolDatabase {
   constructor(private readonly sqlite: DatabaseSync) {}
 
+  withSqlite<T>(callback: (sqlite: DatabaseSync) => T): T {
+    return callback(this.sqlite);
+  }
+
   prepare(sql: string) {
     return new PreparedQuery(this.sqlite.prepare(sql), sql);
   }

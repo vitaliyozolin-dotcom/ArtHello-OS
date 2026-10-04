@@ -1,0 +1,32 @@
+$ node scripts/verify-directory-stage1.mjs
+PASS anonymous directory request denied
+PASS teacher directory read denied
+PASS teacher directory mutation denied
+PASS parent directory read denied
+PASS parent directory mutation denied
+PASS student directory read denied
+PASS student directory mutation denied
+PASS methodist directory read denied
+PASS methodist directory mutation denied
+PASS tech_admin directory read denied
+PASS tech_admin directory mutation denied
+PASS director directory available
+PASS deputy directory available
+PASS admin directory available
+PASS cross-origin mutation denied
+PASS missing-origin mutation denied
+PASS concurrent stale writer rejected
+PASS teacher assignment created
+PASS teacher only sees assigned class
+PASS teacher only sees assigned pupils
+PASS parent sees own child only
+PASS parent sees own class only
+PASS student sees own child only
+PASS student sees own class only
+PASS homeroom teacher saved
+PASS access action targets central access module
+PASS subject edit survives restart
+PASS homeroom edit survives restart
+PASS assignment survives restart
+PASS database integrity
+{"passed":30,"browser":false,"productionChanged":false}

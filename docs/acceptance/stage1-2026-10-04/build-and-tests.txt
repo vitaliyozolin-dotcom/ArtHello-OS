@@ -1,0 +1,151 @@
+$ pnpm run build && node --test tests/registration-contract.test.mjs tests/school-structure-contract.test.mjs tests/phone-auth-contract.test.mjs tests/central-access-contract.test.mjs tests/central-family-directory.test.mjs tests/identity-broker-contract.test.mjs tests/design-code-contract.test.mjs tests/methodist-role-contract.test.mjs tests/maintenance-gate.test.mjs tests/curriculum-import.test.mjs tests/curriculum-release-import.test.mjs tests/schedule-import.test.mjs tests/directory-management.test.mjs tests/central-management.test.mjs
+$ NEXT_TELEMETRY_DISABLED=1 next build --webpack
+▲ Next.js 16.2.6 (webpack)
+
+  Creating an optimized production build ...
+  Using tsconfig file: tsconfig.next.json
+  Using tsconfig file: tsconfig.next.json
+  Using tsconfig file: tsconfig.next.json
+✓ Compiled successfully in 15.0s
+  Running TypeScript ...
+  Finished TypeScript in 15.6s ...
+  Collecting page data using 8 workers ...
+  Generating static pages using 8 workers (0/10) ...
+  Generating static pages using 8 workers (2/10)
+  Generating static pages using 8 workers (4/10)
+  Generating static pages using 8 workers (7/10)
+✓ Generating static pages using 8 workers (10/10) in 762ms
+  Finalizing page optimization ...
+  Collecting build traces ...
+
+Route (app)
+┌ ○ /
+├ ○ /_not-found
+├ ƒ /[...path]
+├ ○ /activate
+├ ƒ /api/auth/activate
+├ ƒ /api/auth/login
+├ ƒ /api/auth/logout
+├ ƒ /api/auth/passwordless/magic
+├ ƒ /api/auth/passwordless/request
+├ ƒ /api/auth/passwordless/verify
+├ ƒ /api/auth/return-to-arthello
+├ ƒ /api/directory
+├ ƒ /api/health
+├ ƒ /api/internal/directory-sync
+├ ƒ /api/internal/family-access-sync
+├ ƒ /api/internal/staff-sync
+├ ƒ /api/school
+├ ƒ /auth/central/callback
+├ ƒ /auth/central/start
+└ ○ /login
+
+
+ƒ Proxy (Middleware)
+
+○  (Static)   prerendered as static content
+ƒ  (Dynamic)  server-rendered on demand
+
+✔ staff access is accepted only through signed central events (4.545004ms)
+✔ central block and access update revoke existing sessions (0.659692ms)
+✔ employee login uses ArtHello OS SSO instead of local credentials (0.83839ms)
+✔ local management cannot create or reset staff credentials (0.890676ms)
+✔ local user records retain the central identity without changing teaching assignments (0.766857ms)
+✔ diary accepts central family projections and blocks local duplicates (33.66113ms)
+✔ management links lead to existing central modules (3.863038ms)
+✔ unknown sections, paths and URLs cannot create an open redirect (1.188173ms)
+✔ XLSX parser finds a shifted header and preserves topics, hours and homework (416.5656ms)
+✔ XLSX parser rejects a workbook without required columns (58.819919ms)
+✔ XLSX parser skips a cover sheet and finds the curriculum sheet (55.550728ms)
+✔ XLSX parser skips section headings and aggregate footers inside the lesson table (61.071075ms)
+✔ XLSX parser still rejects a numbered lesson without hours (83.969356ms)
+✔ XLSX parser rejects an ambiguous topic-only row when optional columns are absent (30.521209ms)
+✔ XLSX parser accepts explicit sections without optional columns (21.915334ms)
+✔ XLSX parser rejects signed and arbitrary hour values (206.153529ms)
+✔ a four-day timetable gives 136 math slots after the 2026/27 vacations (3.556555ms)
+✔ the received five-day timetable gives 171 second-grade math slots (2.830223ms)
+✔ a 170-hour program remains complete and explicit when only 136 slots exist (0.89253ms)
+✔ release importer runs from an isolated runtime without ExcelJS (1709.64662ms)
+✔ offline image overlays the dependency-free release importers (0.67632ms)
+✔ approved 170-hour math KTP is imported once across the full 2026/27 calendar (1058.330938ms)
+✔ release import removes only extra 2026/27 vacations (567.364047ms)
+✔ failed strict verification rolls back calendar and KTP mutations (547.579069ms)
+✔ release schedule import preserves lessons outside source classes (525.788619ms)
+✔ approved design-code identity is immutable (8.748085ms)
+✔ only approved design radii are defined (17.636954ms)
+✔ design code is gated by the build flag (1.225018ms)
+✔ approved Onest is served as a local preloaded WOFF2 (0.773176ms)
+✔ production container enables approved design by default (0.98182ms)
+✔ login follows the approved form contract (1.274743ms)
+✔ foundation overrides are scoped to the v1 feature flag (0.852825ms)
+✔ DS-02 tablet shell is fixed at the approved 768–1199 range (1.601982ms)
+✔ DS-03 student theme changes tokens and typography only (14.542828ms)
+✔ CSS contract helpers ignore comments and require an exact selector (25.046276ms)
+✔ DS-04 Tabs have one keyboard contract and one stable shared panel id (57.303802ms)
+✔ DS-04 HelpButton closes with its action and stays inside the active overlay (53.47465ms)
+✔ DS-04 typography, logo, fields, and status pill use exact approved roles (70.523482ms)
+✔ DS-04 buttons expose real busy state and a width-stable label grid (14.717473ms)
+✔ DS-04 applies the full shared card inventory at 24px and 16px (10.585662ms)
+✔ DS-04 gives both visual tables a complete ARIA table contract (14.300105ms)
+✔ DS-04 semantic debt preserves every flag-off pair and remaps every v1 pair (48.065179ms)
+✔ DS-04 student theme is v1-scoped and cannot own component geometry (8.939642ms)
+✔ DS-04 stays merge-blocking and inert when its feature flag is off (2.256548ms)
+✔ subject rename propagates through joins; its ID and historical grade stay intact (43.362494ms)
+✔ every non-operational role and a forged director actor are denied without writes (81.258079ms)
+✔ stale edit is rejected and cannot overwrite a newer subject change (12.517661ms)
+✔ confirmed teacher assignment is idempotent and gives exactly its class and subject (22.178148ms)
+✔ unknown, unconfirmed or blocked teachers and foreign classes cannot be assigned (65.306338ms)
+✔ homeroom update preserves central class identity and membership (20.630648ms)
+✔ subject with active assignments cannot be archived; archive preserves historical grades (25.177718ms)
+✔ audit failure rolls back the business write (14.450993ms)
+✔ unknown actions cannot change users or grant roles (15.828811ms)
+✔ passwordless challenges are hashed, expiring, rate-limited and one-time (58.996883ms)
+✔ passwordless delivery is a signed server-to-server call (14.681809ms)
+✔ central employee SSO is stateful, PKCE-bound and fixed-audience (229.524219ms)
+✔ central employee callback never redirects to an internal bind address (24.243343ms)
+✔ staff passwords are retired while family fallback remains controllable (123.480361ms)
+✔ maintenance marker lookup is dependency-free and fails closed (46.678621ms)
+✔ proxy matcher centrally covers every production HTTP writer (1.371566ms)
+✔ gate exposes the exact non-cacheable deployment response contract (0.719328ms)
+✔ the gate disappears with the marker (32.443811ms)
+✔ methodist is a centrally managed staff role at every auth boundary (3.053131ms)
+✔ methodist has a separate curriculum scope, not leadership or operations (1.11911ms)
+✔ methodist snapshot is limited to curriculum data and a contact-free teacher directory (1.063881ms)
+✔ methodist can review KTP but cannot approve, publish grades or edit schedule (1.411862ms)
+✔ changes requested requires a visible review comment with deterministic lifecycle (1.407924ms)
+✔ academic calendar periods are visible from the methodist calendar (0.469451ms)
+✔ parents and students keep direct diary entry while OTP is introduced (3.801343ms)
+✔ employees use ArtHello OS SSO and cannot create a diary password session (0.795654ms)
+✔ same-origin validation uses the configured public origin behind the proxy (1.131264ms)
+✔ central revocation invalidates existing technical access (0.93993ms)
+✔ management exposes central identity source (1.560417ms)
+✔ self-hosted service is not exposed without the HTTPS proxy (1.26826ms)
+✔ legacy registration tables remain readable during migration (2.991393ms)
+✔ invitation tokens are stored as hashes and expire (0.6777ms)
+✔ local registration is blocked before any mutation (0.540886ms)
+✔ school no longer offers a local student or family creation action (0.904322ms)
+✔ schedule parser keeps five weekly math lessons and ignores lunch (181.649057ms)
+✔ parallel English and math groups remain separate lessons (72.82812ms)
+✔ joint lessons across classes share one teacher session (2.633135ms)
+✔ unknown schedule labels stop import instead of guessing (51.786368ms)
+✔ approved 2026/27 source contains all classes and five second-grade math slots (13.648563ms)
+✔ school structure contains classes 1 through 6 and the supplied staff (3.531017ms)
+✔ operational people directory opens with pupils and exposes class membership (0.880373ms)
+✔ uncertain staff records remain explicitly uncertain (0.682968ms)
+✔ manual scheduling supports edit, delete, copy and conflict checks (0.739201ms)
+✔ role access is fixed by the authenticated account and cannot be impersonated (1.443339ms)
+✔ teacher writes are restricted to confirmed class and subject assignments (0.592369ms)
+✔ operating modules use persistent schema and audited actions (1.347708ms)
+✔ KTP import is role-scoped, calendar-aware and blocks false approval (1.552853ms)
+✔ KTP status transitions follow review, approval and activation stages (0.852761ms)
+✔ manual lesson homework is safely published once into the family diary (5.486154ms)
+✔ the director workspace does not show a synthetic setup score (0.71877ms)
+✔ production cutover cannot restore a backup after accepting new writes (1.976654ms)
+ℹ tests 95
+ℹ suites 0
+ℹ pass 95
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 5413.904421

@@ -35,7 +35,7 @@ test("school structure contains classes 1 through 6 and the supplied staff", () 
 });
 
 test("operational people directory opens with pupils and exposes class membership", () => {
-  assert.match(appSource, /useState<"students" \| "classes" \| "teachers">\("students"\)/);
+  assert.match(appSource, /useState<"students" \| "classes" \| "teachers" \| "imports">\("students"\)/);
   assert.match(appSource, /id="people-directory"/);
   assert.match(appSource, /label: `Ученики · \$\{snapshot\.students\.length\}`/);
   assert.match(appSource, /label: `Классы · \$\{snapshot\.classes\.length\}`/);

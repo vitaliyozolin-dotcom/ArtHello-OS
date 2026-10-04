@@ -6,6 +6,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState, type FormEve
 import { createPortal } from "react-dom";
 import { Icon, type IconName } from "./icons";
 import { splitTeacherDirectory } from "./teacher-directory";
+import { DirectoryManagement } from "./directory-management";
 import { roleLabels, type ActionKind, type Role, type SchoolSnapshot } from "./level-zero-types";
 
 type View = "home" | "calendar" | "schedule" | "programs" | "journal" | "homework" | "people" | "school" | "messages" | "management" | "profile";
@@ -481,7 +482,7 @@ function StaffDirectory({ snapshot, pending = false }: { snapshot: SchoolSnapsho
   const directory = splitTeacherDirectory(snapshot);
   const teachers = pending ? directory.pending : directory.teachers;
   return <div className="staff-directory">{teachers.map((teacher) => {
-    const assignments = snapshot.teacherAssignments.filter((item) => item.teacherUserId === teacher.id);
+    const assignments = snapshot.teacherAssignments.filter((item) => item.teacherUserId === teacher.id && item.status === "confirmed");
     const classes = [...new Set(assignments.map((item) => item.className))].sort((a, b) => Number(a) - Number(b));
     const subjects = [...new Set(assignments.map((item) => item.subjectName))];
     const meta = teacher.identitySource === "central_directory" && teacher.profileStatus === "unconfirmed" ? { label: "Назначения не подтверждены", tone: "warn" as const } : staffStatusMeta[teacher.profileStatus] ?? staffStatusMeta.unconfirmed;
@@ -595,6 +596,21 @@ function TeacherDashboard({ snapshot, openAction, onView }: { snapshot: SchoolSn
   );
 }
 
+function SchoolControlCenter() {
+  const cards = [
+    ["/api/auth/return-to-arthello?section=hr", "Педагоги", "Добавить и изменить сотрудника"],
+    ["/api/auth/return-to-arthello?section=clients", "Ученики и родители", "Карточки семьи и связи"],
+    ["/management?tab=classes", "Классы", "Состав и классные руководители"],
+    ["/management?tab=subjects", "Предметы", "Добавить, изменить, архивировать"],
+    ["/management?tab=assignments", "Назначения педагогов", "Учитель, класс и предмет"],
+    ["/management?tab=access", "Доступы", "Выдать, изменить, заблокировать"],
+    ["/programs", "Программы и КТП", "Учебное планирование"],
+    ["/schedule", "Расписание", "Уроки, замены и кабинеты"],
+    ["/calendar", "Календарь", "События школы"],
+  ];
+  return <section className="content-card"><SectionTitle title="Управление школой" subtitle="Откройте нужный раздел для изменения данных" /><div className="directory-control-grid">{cards.map(([href,title,caption]) => <a href={href} key={href}><strong>{title}</strong><small>{caption}</small></a>)}</div></section>;
+}
+
 function LeadershipDashboard({ snapshot, onView }: { snapshot: SchoolSnapshot; onView: (view: View) => void }) {
   const staff = snapshot.users.filter((user) => user.role === "teacher" && user.status !== "archived" && user.profileStatus !== "demo");
   const unresolvedStaff = staff.filter((user) => user.profileStatus !== "confirmed");
@@ -603,6 +619,7 @@ function LeadershipDashboard({ snapshot, onView }: { snapshot: SchoolSnapshot; o
   const unapprovedPrograms = snapshot.programs.filter((program) => !["approved", "active"].includes(program.status)).length;
   return <div className="page-shell">
     <div className="page-heading"><div><span className="eyebrow">ArtHello OS · Обучение</span><h1>Школа 1–11</h1><p>Достоверная картина учебного дня и конкретные точки внимания</p></div><button className="primary-btn" onClick={() => onView("calendar")}><Icon name="calendar" size={18} />Открыть календарь</button></div>
+    <SchoolControlCenter />
     <section className="metric-grid">
       <MetricCard label="Ученики" value={String(snapshot.students.length)} caption="активные карточки" icon="users" onClick={() => onView("people")} />
       <MetricCard label="Средний балл" value={weightedAverage(snapshot.grades)} caption="по опубликованным оценкам" icon="chart" tone="blue" onClick={() => onView("journal")} />
@@ -652,6 +669,7 @@ function AdminDashboard({ snapshot, openAction, onView }: { snapshot: SchoolSnap
   const pendingReports = snapshot.events.filter((event) => event.status === "awaiting_report").length;
   return <div className="page-shell">
     <div className="page-heading"><div><span className="eyebrow">Ежедневная организация</span><h1>Рабочий стол администратора</h1><p>{weekdays[todayWeekday()]} · расписание, семьи, меню и события</p></div><button className="primary-btn" onClick={() => onView("schedule")}><Icon name="calendar" size={18} />Расписание</button></div>
+    <SchoolControlCenter />
     <section className="metric-grid">
       <MetricCard label="Уроки сегодня" value={String(todayLessons.length)} caption="опубликовано" icon="clock" onClick={() => onView("schedule")} />
       <MetricCard label="Заявки семей" value={String(snapshot.registrationRequests.length)} caption="ожидают проверки" icon="users" tone="blue" onClick={() => onView("management")} />
@@ -882,17 +900,19 @@ function PeoplePage({ snapshot }: { snapshot: SchoolSnapshot }) {
   const operational = snapshot.viewer.role === "director" || snapshot.viewer.role === "deputy" || snapshot.viewer.role === "admin";
   const [directoryTab, setDirectoryTab] = useState<"students" | "classes" | "teachers" | "imports">("students");
   const [classFilter, setClassFilter] = useState<string>("all");
+  const [peopleQuery, setPeopleQuery] = useState("");
   const [selectedStudentId, setSelectedStudentId] = useState<string | null>(null);
   if (!operational) {
     return <div className="page-shell"><div className="page-heading"><div><span className="eyebrow">{snapshot.viewer.role === "teacher" ? "Назначенные классы" : "Семья"}</span><h1>{snapshot.viewer.role === "teacher" ? "Мои классы и ученики" : "Мои дети"}</h1><p>Только разрешённые карточки без доступа к чужим данным</p></div></div><section className="student-directory">{snapshot.students.map((student) => <button key={student.id} onClick={() => setSelectedStudentId(student.id)}><Avatar name={student.fullName} color={student.avatarColor} size="lg" /><span><strong>{student.fullName}</strong><small>{student.className} класс · средний балл {weightedAverage(snapshot.grades.filter((grade) => grade.studentId === student.id))}</small></span><Icon name="chevron" /></button>)}</section>{snapshot.rankings.mode !== "none" ? <RankingBoard snapshot={snapshot} /> : null}{!snapshot.students.length ? <EmptyState title="Нет доступных карточек" text="Связь с ребёнком или классом должен подтвердить администратор школы." icon="users" /> : null}{selectedStudentId && snapshot.students.some((student) => student.id === selectedStudentId) ? <StudentProfile student={snapshot.students.find((student) => student.id === selectedStudentId)!} snapshot={snapshot} close={() => setSelectedStudentId(null)} /> : null}</div>;
   }
   const { teachers, pending } = splitTeacherDirectory(snapshot);
   const unresolved = [...teachers, ...pending].filter((user) => user.profileStatus !== "confirmed");
-  const filteredStudents = classFilter === "all" ? snapshot.students : snapshot.students.filter((student) => student.className === classFilter);
+  const filteredStudents = snapshot.students.filter((student) => (classFilter === "all" || student.className === classFilter) && [student.fullName, ...(student.parentNames ?? [])].join(" ").toLocaleLowerCase("ru").includes(peopleQuery.trim().toLocaleLowerCase("ru")));
   const selectedStudent = snapshot.students.find((student) => student.id === selectedStudentId) ?? null;
   return <div className="page-shell">
     <div className="page-heading"><div><span className="eyebrow">Единые карточки ArtHello OS</span><h1>Люди, классы и семьи</h1><p>Ученики разнесены по классам; состав класса виден без перехода в другие разделы</p></div><StatusPill tone="good">Источник: ArtHello OS</StatusPill></div>
     <section className="metric-grid"><MetricCard label="Классы" value={String(snapshot.classes.length)} caption="центральная проекция" icon="school" /><MetricCard label="Ученики" value={String(snapshot.students.length)} caption="центральные карточки" icon="users" tone="blue" /><MetricCard label="Педагоги" value={String(teachers.length)} caption="в матрице" icon="user" tone="violet" /><MetricCard label="Требуют решения" value={String(unresolved.length)} caption="вакансии и уточнения" icon="info" tone="amber" /></section>
+    <div className="directory-toolbar"><label>Поиск ученика или родителя<input value={peopleQuery} onChange={event => setPeopleQuery(event.target.value)} placeholder="Имя или фамилия" /></label><a className="secondary-btn" href="/api/auth/return-to-arthello?section=clients">Изменить карточки</a><a className="secondary-btn" href="/management?tab=assignments">Назначения и предметы</a></div>
     <Tabs id="people-directory" value={directoryTab} options={[{ id: "students", label: `Ученики · ${snapshot.students.length}` }, { id: "classes", label: `Классы · ${snapshot.classes.length}` }, { id: "teachers", label: `Педагоги · ${teachers.length}` }, { id: "imports", label: `Из ОС · ${pending.length}` }]} onChange={(value) => { setDirectoryTab(value); setSelectedStudentId(null); }} ariaLabel="Люди и классы" className="tab-row compact-tabs" />
     <TabPanel tabsId="people-directory" value={directoryTab}>
       {directoryTab === "students" ? <section className="content-card">
@@ -909,9 +929,9 @@ function PeoplePage({ snapshot }: { snapshot: SchoolSnapshot }) {
   </div>;
 }
 
-function ManagementPage({ snapshot, openAction }: { snapshot: SchoolSnapshot; openAction: (kind: ActionKind, preset?: Record<string, string>) => void }) {
+function ManagementPage({ snapshot, onSaved }: { snapshot: SchoolSnapshot; onSaved: () => Promise<void> }) {
   if (snapshot.viewer.role === "tech_admin") return <TechnicalAdminPage snapshot={snapshot} />;
-  return <div className="management-page"><AdminManagement snapshot={snapshot} openAction={openAction} /></div>;
+  return <div className="page-shell"><div className="page-heading"><div><span className="eyebrow">Администрирование</span><h1>Управление школой</h1><p>Общие данные и учебные настройки</p></div></div><DirectoryManagement snapshot={snapshot} onSaved={onSaved} /></div>;
 }
 
 function TechnicalAdminPage({ snapshot }: { snapshot: SchoolSnapshot }) {
@@ -1291,6 +1311,12 @@ export default function SchoolApp() {
     const frame = window.requestAnimationFrame(() => { setActiveView(viewFromPath(window.location.pathname)); void load(null); });
     return () => window.cancelAnimationFrame(frame);
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    const refresh = () => { if (document.visibilityState === "visible") void load(); };
+    window.addEventListener("focus", refresh);
+    document.addEventListener("visibilitychange", refresh);
+    return () => { window.removeEventListener("focus", refresh); document.removeEventListener("visibilitychange", refresh); };
+  }, [load]);
   useEffect(() => { const handlePopState = () => setActiveView(viewFromPath(window.location.pathname)); window.addEventListener("popstate", handlePopState); return () => window.removeEventListener("popstate", handlePopState); }, []);
   useEffect(() => { if (!toast) return; const timer = window.setTimeout(() => setToast(null), 3200); return () => window.clearTimeout(timer); }, [toast]);
   useLayoutEffect(() => {
@@ -1362,7 +1388,7 @@ export default function SchoolApp() {
               : activeView === "people" ? <PeoplePage snapshot={snapshot} />
                 : activeView === "school" ? <SchoolPage snapshot={snapshot} openAction={openAction} />
                   : activeView === "messages" ? <MessagesPage snapshot={snapshot} send={send} viewThread={viewThread} />
-                    : activeView === "management" ? <ManagementPage snapshot={snapshot} openAction={openAction} />
+                    : activeView === "management" ? <ManagementPage snapshot={snapshot} onSaved={() => load()} />
                       : <ProfilePage snapshot={snapshot} />;
   const content = hasAccess ? routedContent : <AccessDeniedPage onHome={() => navigate("home")} />;
   const helpAction = modal?.kind ?? (generatedInvite ? "family.invite.create" : undefined);

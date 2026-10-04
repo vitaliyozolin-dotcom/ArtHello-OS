@@ -102,6 +102,7 @@ const centralDirectoryActions = new Set<ActionKind>([
   "student.create",
 ]);
 let structureReady = false;
+let structurePromise: Promise<void> | null = null;
 
 type UserRow = {
   id: string;
@@ -519,6 +520,13 @@ async function ensureRuntimeSchema() {
 
 async function ensureSchoolStructure() {
   if (structureReady) return;
+  if (!structurePromise) structurePromise = initializeSchoolStructure();
+  try { await structurePromise; }
+  catch (error) { structurePromise = null; throw error; }
+}
+
+async function initializeSchoolStructure() {
+  if (structureReady) return;
   await ensureRuntimeSchema();
   const db = await database();
   const statements = [
@@ -528,9 +536,7 @@ async function ensureSchoolStructure() {
           `INSERT INTO subjects
       (id, name, short_name, color, icon, stage, weekly_hours, status)
       VALUES (?, ?, ?, ?, ?, ?, 0, 'active')
-      ON CONFLICT(id) DO UPDATE SET name = excluded.name, short_name = excluded.short_name,
-        color = excluded.color, icon = excluded.icon, stage = excluded.stage,
-        weekly_hours = excluded.weekly_hours, status = 'active', updated_at = CURRENT_TIMESTAMP`,
+      ON CONFLICT(id) DO NOTHING`,
         )
         .bind(
           subject.id,
@@ -547,8 +553,7 @@ async function ensureSchoolStructure() {
           `INSERT INTO users
       (id, email, display_name, role, linked_student_id, status, profile_status, notes)
       VALUES (?, ?, ?, 'teacher', NULL, 'setup', ?, ?)
-      ON CONFLICT(id) DO UPDATE SET display_name = excluded.display_name, role = 'teacher',
-        profile_status = excluded.profile_status, notes = excluded.notes, updated_at = CURRENT_TIMESTAMP`,
+      ON CONFLICT(id) DO NOTHING`,
         )
         .bind(
           staff.id,
@@ -564,9 +569,7 @@ async function ensureSchoolStructure() {
           `INSERT INTO school_classes
       (id, name, grade, homeroom_teacher_user_id, status)
       VALUES (?, ?, ?, ?, 'active')
-      ON CONFLICT(id) DO UPDATE SET name = excluded.name, grade = excluded.grade,
-        homeroom_teacher_user_id = excluded.homeroom_teacher_user_id,
-        status = 'active', updated_at = CURRENT_TIMESTAMP`,
+      ON CONFLICT(id) DO NOTHING`,
         )
         .bind(
           schoolClass.id,
@@ -581,9 +584,7 @@ async function ensureSchoolStructure() {
           `INSERT INTO teacher_assignments
       (id, teacher_user_id, class_name, subject_id, status, notes)
       VALUES (?, ?, ?, ?, ?, ?)
-      ON CONFLICT(id) DO UPDATE SET teacher_user_id = excluded.teacher_user_id,
-        class_name = excluded.class_name, subject_id = excluded.subject_id,
-        status = excluded.status, notes = excluded.notes, updated_at = CURRENT_TIMESTAMP`,
+      ON CONFLICT(id) DO NOTHING`,
         )
         .bind(
           assignment.id,
@@ -600,14 +601,9 @@ async function ensureSchoolStructure() {
           `INSERT INTO academic_calendar_periods
       (id, academic_year, kind, title, starts_on, ends_on)
       VALUES (?, ?, 'vacation', ?, ?, ?)
-      ON CONFLICT(id) DO UPDATE SET academic_year = excluded.academic_year,
-        kind = excluded.kind, title = excluded.title, starts_on = excluded.starts_on,
-        ends_on = excluded.ends_on, updated_at = CURRENT_TIMESTAMP`,
+      ON CONFLICT(id) DO NOTHING`,
         )
         .bind(period.id, ACADEMIC_YEAR.id, period.title, period.startsOn, period.endsOn),
-    ),
-    db.prepare(
-      "UPDATE subjects SET status = 'archived', updated_at = CURRENT_TIMESTAMP WHERE id IN ('algebra', 'geometry', 'social', 'physics', 'chemistry')",
     ),
     db.prepare(
       "UPDATE users SET status = 'archived', profile_status = 'demo', notes = 'Архивная тестовая запись' WHERE id IN ('user-admin-demo', 'user-parent-demo', 'user-teacher-demo', 'user-student-demo')",
@@ -974,7 +970,7 @@ async function loadSnapshot(
   const placeholders = allowedStudentIds.map(() => "?").join(",") || "''";
   const studentBindings = allowedStudentIds.length ? allowedStudentIds : [];
 
-  const [students, classes] = await Promise.all([
+  const [students, allClasses] = await Promise.all([
     rows<SchoolSnapshot["students"][number]>(
       `SELECT id, first_name AS firstName, last_name AS lastName, first_name || ' ' || last_name AS fullName, class_name AS className, birth_year AS birthYear, avatar_color AS avatarColor FROM students WHERE id IN (${placeholders}) ORDER BY class_name, last_name`,
       studentBindings,
@@ -985,6 +981,12 @@ async function loadSnapshot(
       FROM school_classes c LEFT JOIN users u ON u.id = c.homeroom_teacher_user_id
       WHERE c.status = 'active' ORDER BY c.grade, c.name`),
   ]);
+  const assignedClasses = viewer.role === "teacher"
+    ? await rows<{ className: string }>("SELECT DISTINCT class_name AS className FROM teacher_assignments WHERE teacher_user_id = ? AND status = 'confirmed'", [viewer.id])
+    : [];
+  const visibleClassNames = new Set(viewer.role === "teacher" ? assignedClasses.map(item => item.className) : students.map(item => item.className));
+  const classes = operationalRoles.has(viewer.role) || viewer.role === "methodist"
+    ? allClasses : allClasses.filter(item => visibleClassNames.has(item.name));
   // Only parents with a confirmed, active school account and a student link
   // are named here. The directory's family ID alone is not a parent identity.
   const parentLinks = allowedStudentIds.length
