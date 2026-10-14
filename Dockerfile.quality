@@ -5,6 +5,10 @@
 # manager, while quality gates need the locked workspace toolchain.
 FROM node:24-bookworm-slim
 
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends jq \
+    && rm -rf /var/lib/apt/lists/*
+
 ENV CI=1 \
     NODE_ENV=test \
     COREPACK_HOME=/tmp/corepack

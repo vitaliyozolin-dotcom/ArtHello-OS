@@ -132,6 +132,10 @@ Credentials передаются только в process environment:
 
 ## Локальная установка
 
+Полное локальное приложение в Docker (CRM, API, PostgreSQL 16), нестандартные
+loopback-порты и создание владельца: [deploy/local/README.md](deploy/local/README.md).
+Команда из корня: `docker compose -f docker-compose.local.yml up -d --build --wait`.
+
 Требования: Node 24 и pnpm через Corepack.
 
 ```bash

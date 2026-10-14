@@ -1,0 +1,75 @@
+name: arthello-local
+
+x-api: &api
+  image: arthello-local-api
+  build:
+    context: .
+    dockerfile: deploy/Dockerfile
+    target: api
+  environment: &api-env
+    NODE_ENV: development
+    PORT: "8080"
+    DATABASE_URL: postgresql://arthello:local-development-password@postgres:5432/arthello_local
+    APP_ORIGINS: http://localhost:${ARTHELLO_WEB_PORT:-23187},http://127.0.0.1:${ARTHELLO_WEB_PORT:-23187}
+    TRUST_PROXY_HOPS: "0"
+
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: arthello_local
+      POSTGRES_USER: arthello
+      POSTGRES_PASSWORD: local-development-password
+    ports:
+      - "127.0.0.1:${ARTHELLO_DB_PORT:-25487}:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U arthello -d arthello_local"]
+      interval: 3s
+      timeout: 5s
+      retries: 30
+
+  api:
+    <<: *api
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:${ARTHELLO_API_PORT:-28087}:8080"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8080/api/healthz').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+
+  web:
+    build:
+      context: .
+      dockerfile: deploy/Dockerfile
+      target: web
+    depends_on:
+      api:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:${ARTHELLO_WEB_PORT:-23187}:80"
+    volumes:
+      - ./deploy/local/Caddyfile:/etc/caddy/Caddyfile:ro
+
+  create-owner:
+    <<: *api
+    profiles: ["tools"]
+    depends_on:
+      api:
+        condition: service_healthy
+    environment:
+      <<: *api-env
+      AUTH_BOOTSTRAP_OWNER_LOGIN: ${AUTH_BOOTSTRAP_OWNER_LOGIN:-owner}
+      AUTH_BOOTSTRAP_OWNER_NAME: ${AUTH_BOOTSTRAP_OWNER_NAME:-Local owner}
+      AUTH_BOOTSTRAP_OWNER_PASSWORD: ${AUTH_BOOTSTRAP_OWNER_PASSWORD:-}
+    working_dir: /app/artifacts/api-server
+    entrypoint: ["node", "--import", "tsx", "src/scripts/create-owner.ts"]
+
+volumes:
+  postgres-data:

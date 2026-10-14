@@ -14,3 +14,13 @@ dist
 .vscode
 .idea
 .DS_Store
+
+# Secrets must stay outside every build context.
+.env
+.env.*
+!.env.example
+**/.env
+**/.env.*
+!**/.env.example
+.aws
+.codex
