@@ -134,6 +134,8 @@ import type {
   GetLedgerOperationsParams,
   GetLedgerStatsParams,
   GetMarketingLeadsParams,
+  GetMonthlyPlan200,
+  GetMonthlyPlanParams,
   GetOpiuReportParams,
   GetOrphanStudentsParams,
   GetPersonsParams,
@@ -171,6 +173,7 @@ import type {
   MarketingSource,
   MarketingStats,
   MatchBankingTransactionBody,
+  MonthlyPlan,
   NormalizationAuditResponse,
   NormalizeSourceInput,
   Operation,
@@ -210,6 +213,7 @@ import type {
   RunDuplicateDetection200,
   RunDuplicateDetectionBody,
   SaveEvotorPublisherTokenBody,
+  SaveMonthlyPlanBody,
   SeedArticles200,
   SetAtlasBranchInput,
   SetCoverageScopeInput,
@@ -259,6 +263,161 @@ const withQueryKey = <T extends object, K>(query: T, queryKey: K): T & { queryKe
   }
   return result;
 };
+
+export const getGetMonthlyPlanUrl = (params: GetMonthlyPlanParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/finance/monthly-plan?${stringifiedParams}` : `/api/finance/monthly-plan`
+}
+
+/**
+ * @summary Owner monthly targets and observed facts for the whole organization
+ */
+export const getMonthlyPlan = async (params: GetMonthlyPlanParams, options?: RequestInit): Promise<GetMonthlyPlan200> => {
+
+  return customFetch<GetMonthlyPlan200>(getGetMonthlyPlanUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetMonthlyPlanQueryKey = (params?: GetMonthlyPlanParams,) => {
+    return [
+    `/api/finance/monthly-plan`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getGetMonthlyPlanQueryOptions = <TData = Awaited<ReturnType<typeof getMonthlyPlan>>, TError = ErrorType<void>>(params: GetMonthlyPlanParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getMonthlyPlan>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetMonthlyPlanQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getMonthlyPlan>>> = ({ signal }) => getMonthlyPlan(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getMonthlyPlan>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetMonthlyPlanQueryResult = NonNullable<Awaited<ReturnType<typeof getMonthlyPlan>>>
+export type GetMonthlyPlanQueryError = ErrorType<void>
+
+
+/**
+ * @summary Owner monthly targets and observed facts for the whole organization
+ */
+
+export function useGetMonthlyPlan<TData = Awaited<ReturnType<typeof getMonthlyPlan>>, TError = ErrorType<void>>(
+ params: GetMonthlyPlanParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getMonthlyPlan>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetMonthlyPlanQueryOptions(params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getSaveMonthlyPlanUrl = () => {
+
+
+
+
+  return `/api/finance/monthly-plan`
+}
+
+/**
+ * @summary Save owner targets with optimistic revision and atomic history
+ */
+export const saveMonthlyPlan = async (saveMonthlyPlanBody: SaveMonthlyPlanBody, options?: RequestInit): Promise<MonthlyPlan> => {
+
+  return customFetch<MonthlyPlan>(getSaveMonthlyPlanUrl(),
+  {
+    ...options,
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(saveMonthlyPlanBody)
+  }
+);}
+
+
+
+
+
+export const getSaveMonthlyPlanMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof saveMonthlyPlan>>, TError,{data: BodyType<SaveMonthlyPlanBody>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof saveMonthlyPlan>>, TError,{data: BodyType<SaveMonthlyPlanBody>}, TContext> => {
+
+const mutationKey = ['saveMonthlyPlan'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof saveMonthlyPlan>>, {data: BodyType<SaveMonthlyPlanBody>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  saveMonthlyPlan(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type SaveMonthlyPlanMutationResult = NonNullable<Awaited<ReturnType<typeof saveMonthlyPlan>>>
+    export type SaveMonthlyPlanMutationBody = BodyType<SaveMonthlyPlanBody>
+    export type SaveMonthlyPlanMutationError = ErrorType<void>
+
+    /**
+ * @summary Save owner targets with optimistic revision and atomic history
+ */
+export const useSaveMonthlyPlan = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof saveMonthlyPlan>>, TError,{data: BodyType<SaveMonthlyPlanBody>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof saveMonthlyPlan>>,
+        TError,
+        {data: BodyType<SaveMonthlyPlanBody>},
+        TContext
+      > => {
+      return useMutation(getSaveMonthlyPlanMutationOptions(options));
+    }
 
 export const getHealthCheckUrl = () => {
 
@@ -2353,7 +2512,7 @@ export const getSubmitWebsiteLeadUrl = () => {
 /**
  * @summary Receive a website form lead
  */
-export const submitWebsiteLead = async (websiteLeadInput?: WebsiteLeadInput, options?: RequestInit): Promise<WebsiteLeadResult> => {
+export const submitWebsiteLead = async (websiteLeadInput: WebsiteLeadInput, options?: RequestInit): Promise<WebsiteLeadResult> => {
 
   return customFetch<WebsiteLeadResult>(getSubmitWebsiteLeadUrl(),
   {
@@ -2368,9 +2527,9 @@ export const submitWebsiteLead = async (websiteLeadInput?: WebsiteLeadInput, opt
 
 
 
-export const getSubmitWebsiteLeadMutationOptions = <TError = ErrorType<unknown>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof submitWebsiteLead>>, TError,{data?: BodyType<WebsiteLeadInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
-): UseMutationOptions<Awaited<ReturnType<typeof submitWebsiteLead>>, TError,{data?: BodyType<WebsiteLeadInput>}, TContext> => {
+export const getSubmitWebsiteLeadMutationOptions = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof submitWebsiteLead>>, TError,{data: BodyType<WebsiteLeadInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof submitWebsiteLead>>, TError,{data: BodyType<WebsiteLeadInput>}, TContext> => {
 
 const mutationKey = ['submitWebsiteLead'];
 const {mutation: mutationOptions, request: requestOptions} = options ?
@@ -2382,7 +2541,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
 
 
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof submitWebsiteLead>>, {data?: BodyType<WebsiteLeadInput>}> = (props) => {
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof submitWebsiteLead>>, {data: BodyType<WebsiteLeadInput>}> = (props) => {
           const {data} = props ?? {};
 
           return  submitWebsiteLead(data,requestOptions)
@@ -2396,18 +2555,18 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
   return  { mutationFn, ...mutationOptions }}
 
     export type SubmitWebsiteLeadMutationResult = NonNullable<Awaited<ReturnType<typeof submitWebsiteLead>>>
-    export type SubmitWebsiteLeadMutationBody = BodyType<WebsiteLeadInput> | undefined
-    export type SubmitWebsiteLeadMutationError = ErrorType<unknown>
+    export type SubmitWebsiteLeadMutationBody = BodyType<WebsiteLeadInput>
+    export type SubmitWebsiteLeadMutationError = ErrorType<void>
 
     /**
  * @summary Receive a website form lead
  */
-export const useSubmitWebsiteLead = <TError = ErrorType<unknown>,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof submitWebsiteLead>>, TError,{data?: BodyType<WebsiteLeadInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+export const useSubmitWebsiteLead = <TError = ErrorType<void>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof submitWebsiteLead>>, TError,{data: BodyType<WebsiteLeadInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
  ): UseMutationResult<
         Awaited<ReturnType<typeof submitWebsiteLead>>,
         TError,
-        {data?: BodyType<WebsiteLeadInput>},
+        {data: BodyType<WebsiteLeadInput>},
         TContext
       > => {
       return useMutation(getSubmitWebsiteLeadMutationOptions(options));

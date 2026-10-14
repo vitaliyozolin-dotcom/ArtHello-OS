@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./pulse-plan": "./src/pulse-plan.ts",
     "./csrf": "./src/csrf.ts",
     "./money": "./src/money.ts",
     "./normalize-phone": "./src/normalize-phone.ts",

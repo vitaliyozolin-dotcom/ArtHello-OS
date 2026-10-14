@@ -15,6 +15,62 @@ tags:
   - name: webhooks
   - name: identity
 paths:
+  /finance/monthly-plan:
+    get:
+      operationId: getMonthlyPlan
+      tags: [finance]
+      summary: Owner monthly targets and observed facts for the whole organization
+      parameters:
+        - in: query
+          name: month
+          required: true
+          schema: { type: string, pattern: '^20[0-9]{2}-(0[1-9]|1[0-2])$' }
+      responses:
+        "200":
+          description: Targets and observed subset; unknown facts are null
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [month, plan, facts]
+                properties:
+                  month: { type: string }
+                  plan:
+                    anyOf:
+                      - $ref: '#/components/schemas/MonthlyPlan'
+                      - type: 'null'
+                  facts: { $ref: '#/components/schemas/MonthlyPlanTargets' }
+        "400": { description: Invalid month }
+        "401": { description: Authentication required }
+        "403": { description: Access denied }
+        "500": { description: Storage error }
+    put:
+      operationId: saveMonthlyPlan
+      tags: [finance]
+      summary: Save owner targets with optimistic revision and atomic history
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [month, revision, targets]
+              properties:
+                month: { type: string, pattern: '^20[0-9]{2}-(0[1-9]|1[0-2])$' }
+                revision: { type: integer, minimum: 0 }
+                targets: { $ref: '#/components/schemas/MonthlyPlanTargets' }
+      responses:
+        "200":
+          description: Saved plan
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MonthlyPlan' }
+        "400": { description: Invalid targets }
+        "401": { description: Authentication required }
+        "403": { description: Owner and CSRF required }
+        "409": { description: Plan revision changed }
+        "500": { description: Storage error }
+
   /healthz:
     get:
       operationId: healthCheck
@@ -3046,6 +3102,25 @@ paths:
 
 components:
   schemas:
+    MonthlyPlanTargets:
+      type: object
+      additionalProperties: false
+      required: [leads, students, payments, receiptsMinor]
+      description: Null means unset or unconfirmed. Receipts are integer kopecks, not accrued revenue. At least one target is required when saving.
+      properties:
+        leads: { type: [integer, 'null'], minimum: 0, maximum: 9007199254740991 }
+        students: { type: [integer, 'null'], minimum: 0, maximum: 9007199254740991 }
+        payments: { type: [integer, 'null'], minimum: 0, maximum: 9007199254740991 }
+        receiptsMinor: { type: [integer, 'null'], minimum: 0, maximum: 9007199254740991 }
+    MonthlyPlan:
+      type: object
+      required: [month, revision, targets, updatedAt, updatedBy]
+      properties:
+        month: { type: string }
+        revision: { type: integer, minimum: 1 }
+        targets: { $ref: '#/components/schemas/MonthlyPlanTargets' }
+        updatedAt: { type: string, format: date-time }
+        updatedBy: { type: string }
 
     ImportStatementInput:
       type: object

@@ -9,6 +9,126 @@ import * as zod from 'zod/v4';
 
 
 /**
+ * @summary Owner monthly targets and observed facts for the whole organization
+ */
+export const getMonthlyPlanQueryMonthRegExp = new RegExp('^20[0-9]{2}-(0[1-9]|1[0-2])$');
+
+
+export const GetMonthlyPlanQueryParams = zod.object({
+  "month": zod.coerce.string().regex(getMonthlyPlanQueryMonthRegExp)
+})
+
+
+export const getMonthlyPlanResponsePlanOneTargetsLeadsMin = 0;
+export const getMonthlyPlanResponsePlanOneTargetsLeadsMax = 9007199254740991;
+
+export const getMonthlyPlanResponsePlanOneTargetsStudentsMin = 0;
+export const getMonthlyPlanResponsePlanOneTargetsStudentsMax = 9007199254740991;
+
+export const getMonthlyPlanResponsePlanOneTargetsPaymentsMin = 0;
+export const getMonthlyPlanResponsePlanOneTargetsPaymentsMax = 9007199254740991;
+
+export const getMonthlyPlanResponsePlanOneTargetsReceiptsMinorMin = 0;
+export const getMonthlyPlanResponsePlanOneTargetsReceiptsMinorMax = 9007199254740991;
+
+export const getMonthlyPlanResponseFactsLeadsMin = 0;
+export const getMonthlyPlanResponseFactsLeadsMax = 9007199254740991;
+
+export const getMonthlyPlanResponseFactsStudentsMin = 0;
+export const getMonthlyPlanResponseFactsStudentsMax = 9007199254740991;
+
+export const getMonthlyPlanResponseFactsPaymentsMin = 0;
+export const getMonthlyPlanResponseFactsPaymentsMax = 9007199254740991;
+
+export const getMonthlyPlanResponseFactsReceiptsMinorMin = 0;
+export const getMonthlyPlanResponseFactsReceiptsMinorMax = 9007199254740991;
+
+
+
+export const GetMonthlyPlanResponse = zod.object({
+  "month": zod.string(),
+  "plan": zod.union([zod.object({
+  "month": zod.string(),
+  "revision": zod.number().min(1),
+  "targets": zod.object({
+  "leads": zod.number().min(getMonthlyPlanResponsePlanOneTargetsLeadsMin).max(getMonthlyPlanResponsePlanOneTargetsLeadsMax).nullable(),
+  "students": zod.number().min(getMonthlyPlanResponsePlanOneTargetsStudentsMin).max(getMonthlyPlanResponsePlanOneTargetsStudentsMax).nullable(),
+  "payments": zod.number().min(getMonthlyPlanResponsePlanOneTargetsPaymentsMin).max(getMonthlyPlanResponsePlanOneTargetsPaymentsMax).nullable(),
+  "receiptsMinor": zod.number().min(getMonthlyPlanResponsePlanOneTargetsReceiptsMinorMin).max(getMonthlyPlanResponsePlanOneTargetsReceiptsMinorMax).nullable()
+}).describe('Null means unset or unconfirmed. Receipts are integer kopecks, not accrued revenue. At least one target is required when saving.'),
+  "updatedAt": zod.coerce.date(),
+  "updatedBy": zod.string()
+}),zod.null()]),
+  "facts": zod.object({
+  "leads": zod.number().min(getMonthlyPlanResponseFactsLeadsMin).max(getMonthlyPlanResponseFactsLeadsMax).nullable(),
+  "students": zod.number().min(getMonthlyPlanResponseFactsStudentsMin).max(getMonthlyPlanResponseFactsStudentsMax).nullable(),
+  "payments": zod.number().min(getMonthlyPlanResponseFactsPaymentsMin).max(getMonthlyPlanResponseFactsPaymentsMax).nullable(),
+  "receiptsMinor": zod.number().min(getMonthlyPlanResponseFactsReceiptsMinorMin).max(getMonthlyPlanResponseFactsReceiptsMinorMax).nullable()
+}).describe('Null means unset or unconfirmed. Receipts are integer kopecks, not accrued revenue. At least one target is required when saving.')
+})
+
+
+/**
+ * @summary Save owner targets with optimistic revision and atomic history
+ */
+export const saveMonthlyPlanBodyMonthRegExp = new RegExp('^20[0-9]{2}-(0[1-9]|1[0-2])$');
+export const saveMonthlyPlanBodyRevisionMin = 0;
+
+export const saveMonthlyPlanBodyTargetsLeadsMin = 0;
+export const saveMonthlyPlanBodyTargetsLeadsMax = 9007199254740991;
+
+export const saveMonthlyPlanBodyTargetsStudentsMin = 0;
+export const saveMonthlyPlanBodyTargetsStudentsMax = 9007199254740991;
+
+export const saveMonthlyPlanBodyTargetsPaymentsMin = 0;
+export const saveMonthlyPlanBodyTargetsPaymentsMax = 9007199254740991;
+
+export const saveMonthlyPlanBodyTargetsReceiptsMinorMin = 0;
+export const saveMonthlyPlanBodyTargetsReceiptsMinorMax = 9007199254740991;
+
+
+
+export const SaveMonthlyPlanBody = zod.object({
+  "month": zod.string().regex(saveMonthlyPlanBodyMonthRegExp),
+  "revision": zod.number().min(saveMonthlyPlanBodyRevisionMin),
+  "targets": zod.object({
+  "leads": zod.number().min(saveMonthlyPlanBodyTargetsLeadsMin).max(saveMonthlyPlanBodyTargetsLeadsMax).nullable(),
+  "students": zod.number().min(saveMonthlyPlanBodyTargetsStudentsMin).max(saveMonthlyPlanBodyTargetsStudentsMax).nullable(),
+  "payments": zod.number().min(saveMonthlyPlanBodyTargetsPaymentsMin).max(saveMonthlyPlanBodyTargetsPaymentsMax).nullable(),
+  "receiptsMinor": zod.number().min(saveMonthlyPlanBodyTargetsReceiptsMinorMin).max(saveMonthlyPlanBodyTargetsReceiptsMinorMax).nullable()
+}).describe('Null means unset or unconfirmed. Receipts are integer kopecks, not accrued revenue. At least one target is required when saving.')
+})
+
+
+export const saveMonthlyPlanResponseTargetsLeadsMin = 0;
+export const saveMonthlyPlanResponseTargetsLeadsMax = 9007199254740991;
+
+export const saveMonthlyPlanResponseTargetsStudentsMin = 0;
+export const saveMonthlyPlanResponseTargetsStudentsMax = 9007199254740991;
+
+export const saveMonthlyPlanResponseTargetsPaymentsMin = 0;
+export const saveMonthlyPlanResponseTargetsPaymentsMax = 9007199254740991;
+
+export const saveMonthlyPlanResponseTargetsReceiptsMinorMin = 0;
+export const saveMonthlyPlanResponseTargetsReceiptsMinorMax = 9007199254740991;
+
+
+
+export const SaveMonthlyPlanResponse = zod.object({
+  "month": zod.string(),
+  "revision": zod.number().min(1),
+  "targets": zod.object({
+  "leads": zod.number().min(saveMonthlyPlanResponseTargetsLeadsMin).max(saveMonthlyPlanResponseTargetsLeadsMax).nullable(),
+  "students": zod.number().min(saveMonthlyPlanResponseTargetsStudentsMin).max(saveMonthlyPlanResponseTargetsStudentsMax).nullable(),
+  "payments": zod.number().min(saveMonthlyPlanResponseTargetsPaymentsMin).max(saveMonthlyPlanResponseTargetsPaymentsMax).nullable(),
+  "receiptsMinor": zod.number().min(saveMonthlyPlanResponseTargetsReceiptsMinorMin).max(saveMonthlyPlanResponseTargetsReceiptsMinorMax).nullable()
+}).describe('Null means unset or unconfirmed. Receipts are integer kopecks, not accrued revenue. At least one target is required when saving.'),
+  "updatedAt": zod.coerce.date(),
+  "updatedBy": zod.string()
+})
+
+
+/**
  * @summary Health check
  */
 export const HealthCheckResponse = zod.object({
@@ -551,6 +671,14 @@ export const ImportGoogleSheetResponse = zod.object({
 /**
  * @summary Receive a website form lead
  */
+export const SubmitWebsiteLeadHeader = zod.object({
+  "Idempotency-Key": zod.string(),
+  "X-ArtHello-Signature": zod.string(),
+  "X-ArtHello-Key-Id": zod.string(),
+  "X-ArtHello-Timestamp": zod.string(),
+  "X-ArtHello-Event-Id": zod.string()
+})
+
 export const SubmitWebsiteLeadBody = zod.object({
   "name": zod.string().optional(),
   "phone": zod.string().optional(),

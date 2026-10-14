@@ -1,20 +1,41 @@
 {
   "schema_version": 1,
   "source_of_truth": "artifacts/api-server/src/lib/security/access-policy.ts",
-  "production_roles": ["owner", "accountant", "viewer", "payment_operator"],
+  "production_roles": [
+    "owner",
+    "accountant",
+    "viewer",
+    "payment_operator"
+  ],
   "scopes": {
     "none": null,
     "complete": {
       "unrestricted": false,
-      "branchIds": ["proof-branch"],
-      "legalEntityIds": ["proof-legal-entity"]
+      "branchIds": [
+        "proof-branch"
+      ],
+      "legalEntityIds": [
+        "proof-legal-entity"
+      ]
     }
   },
   "persona_gaps": [
-    { "persona": "administrator", "status": "NOT_YET_AUTH_ROLE" },
-    { "persona": "teacher", "status": "NOT_YET_AUTH_ROLE" },
-    { "persona": "parent", "status": "NOT_YET_AUTH_ROLE" },
-    { "persona": "employee", "status": "NOT_YET_AUTH_ROLE" }
+    {
+      "persona": "administrator",
+      "status": "NOT_YET_AUTH_ROLE"
+    },
+    {
+      "persona": "teacher",
+      "status": "NOT_YET_AUTH_ROLE"
+    },
+    {
+      "persona": "parent",
+      "status": "NOT_YET_AUTH_ROLE"
+    },
+    {
+      "persona": "employee",
+      "status": "NOT_YET_AUTH_ROLE"
+    }
   ],
   "cases": [
     {
@@ -202,6 +223,78 @@
       "role": "payment_operator",
       "method": "POST",
       "path": "/payments/routes",
+      "scope": "complete",
+      "allowed": false,
+      "policy": "write-denied"
+    },
+    {
+      "id": "owner-get-monthly-plan",
+      "role": "owner",
+      "method": "GET",
+      "path": "/finance/monthly-plan",
+      "scope": "complete",
+      "allowed": true,
+      "policy": "owner-full-access"
+    },
+    {
+      "id": "owner-put-monthly-plan",
+      "role": "owner",
+      "method": "PUT",
+      "path": "/finance/monthly-plan",
+      "scope": "complete",
+      "allowed": true,
+      "policy": "owner-full-access"
+    },
+    {
+      "id": "accountant-get-monthly-plan",
+      "role": "accountant",
+      "method": "GET",
+      "path": "/finance/monthly-plan",
+      "scope": "complete",
+      "allowed": false,
+      "policy": "scope-route-not-enforced"
+    },
+    {
+      "id": "accountant-put-monthly-plan",
+      "role": "accountant",
+      "method": "PUT",
+      "path": "/finance/monthly-plan",
+      "scope": "complete",
+      "allowed": false,
+      "policy": "write-denied"
+    },
+    {
+      "id": "viewer-get-monthly-plan",
+      "role": "viewer",
+      "method": "GET",
+      "path": "/finance/monthly-plan",
+      "scope": "complete",
+      "allowed": false,
+      "policy": "scope-route-not-enforced"
+    },
+    {
+      "id": "viewer-put-monthly-plan",
+      "role": "viewer",
+      "method": "PUT",
+      "path": "/finance/monthly-plan",
+      "scope": "complete",
+      "allowed": false,
+      "policy": "write-denied"
+    },
+    {
+      "id": "payment_operator-get-monthly-plan",
+      "role": "payment_operator",
+      "method": "GET",
+      "path": "/finance/monthly-plan",
+      "scope": "complete",
+      "allowed": false,
+      "policy": "scope-route-not-enforced"
+    },
+    {
+      "id": "payment_operator-put-monthly-plan",
+      "role": "payment_operator",
+      "method": "PUT",
+      "path": "/finance/monthly-plan",
       "scope": "complete",
       "allowed": false,
       "policy": "write-denied"

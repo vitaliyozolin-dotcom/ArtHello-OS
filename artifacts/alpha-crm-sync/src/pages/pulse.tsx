@@ -1,3 +1,4 @@
+import { MonthlyPlanSection } from "@/components/monthly-plan";
 import {
   useGetMarketingStats,
   useGetBankingCashflow, useGetBankingAlerts, useGetBankingForecast,
@@ -632,97 +633,8 @@ function PulseAlertsSection() {
 
 // ─── ПЛАН / ФАКТ ──────────────────────────────────────────────────────────────
 
-function PlanFactRow({ label, fact, plan, isRub }: {
-  label: string;
-  fact: number | null;
-  plan: number | null;
-  isRub?: boolean;
-}) {
-  const pct = plan && plan > 0 && fact != null ? Math.min(Math.round((fact / plan) * 100), 100) : null;
-  const barColor = pct == null ? 'bg-gray-200' : pct >= 90 ? 'bg-[#10B981]' : pct >= 60 ? 'bg-[#F97316]' : 'bg-[#EF4444]';
-  const pctColor = pct == null ? 'text-[#667085]' : pct >= 90 ? 'text-[#10B981]' : pct >= 60 ? 'text-[#F97316]' : 'text-[#EF4444]';
-  const fmt2 = (n: number | null) => n == null ? '—' : isRub ? formatCompactRub(n) : fmtNum(n);
-
-  return (
-    <div className="flex items-center gap-3 py-3 border-b border-black/[0.04] last:border-0">
-      <div className="w-[90px] sm:w-[110px] shrink-0 text-[13px] font-medium text-[#0F172A]">{label}</div>
-      <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-2 mb-1">
-          <div className="flex-1 h-1.5 rounded-full bg-gray-100 overflow-hidden min-w-0">
-            <div className={`h-full rounded-full transition-all ${barColor}`} style={{ width: `${pct ?? 0}%` }} />
-          </div>
-          <span className={`text-[11px] font-bold w-9 text-right tabular-nums shrink-0 ${pctColor}`}>
-            {pct != null ? `${pct}%` : '—'}
-          </span>
-        </div>
-        <div className="flex flex-wrap gap-x-3 text-[11px] text-[#667085]">
-          <span>Факт: <span className="font-semibold text-[#0F172A]">{fmt2(fact)}</span></span>
-          <span>План: <span className="text-[#667085]">{fmt2(plan)}</span></span>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 function PulsePlanFactSection() {
-  const { data: syncStats } = useRetiredSyncStats({ query: { queryKey: getRetiredSyncStatsQueryKey() } });
-  const { data: mktStats } = useGetMarketingStats({ query: { queryKey: getGetMarketingStatsQueryKey() } });
-
-  const hasAnyPlan = false;
-
-  const rows = [
-    { label: 'Лиды',       fact: toNum(mktStats?.totalLeads), plan: null as number | null },
-    { label: 'Конверсии',  fact: toNum(mktStats?.matched),    plan: null as number | null },
-    { label: 'Ученики',    fact: toNum(syncStats?.students),  plan: null as number | null },
-    { label: 'Платежи',    fact: toNum(syncStats?.payments),  plan: null as number | null },
-  ];
-
-  if (!hasAnyPlan) {
-    return (
-      <div className={`${C.glass} p-6`}>
-        <div className="flex items-start justify-between mb-5 gap-3">
-          <div>
-            <h3 className="text-[17px] font-bold text-[#0F172A]">План / Факт</h3>
-            <p className="text-[12px] text-[#667085] mt-0.5">Ключевые показатели месяца</p>
-          </div>
-          <span className="text-[11px] font-medium px-2.5 py-1 bg-amber-50 text-amber-700 rounded-full border border-amber-100 shrink-0">
-            Текущий месяц
-          </span>
-        </div>
-
-        <div className="flex flex-col sm:flex-row items-start sm:items-center gap-5 bg-[#F6F7FB] rounded-[20px] p-5 mb-5">
-          <div className="w-11 h-11 rounded-2xl bg-white flex items-center justify-center shrink-0 shadow-sm">
-            <Target className="w-5 h-5 text-[#7C3AED]" />
-          </div>
-          <div className="flex-1 min-w-0">
-            <p className="text-[14px] font-semibold text-[#0F172A]">План не настроен</p>
-            <p className="text-[13px] text-[#667085] mt-0.5 leading-relaxed">
-              Задайте план по лидам, ученикам, оплатам и выручке — система будет считать выполнение и прогноз.
-            </p>
-          </div>
-          <button className="shrink-0 px-4 py-2.5 rounded-[14px] bg-[#7C3AED] text-white text-[13px] font-semibold min-h-[44px] hover:bg-violet-700 transition-colors whitespace-nowrap">
-            Настроить план
-          </button>
-        </div>
-
-        <div className="space-y-0">
-          {rows.map((r) => (
-            <PlanFactRow key={r.label} {...r} />
-          ))}
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div className={`${C.glass} p-6`}>
-      <div className="flex items-center justify-between mb-5">
-        <h3 className="text-[17px] font-bold text-[#0F172A]">План / Факт</h3>
-        <span className="text-[11px] font-medium px-2.5 py-1 bg-gray-100 text-[#667085] rounded-full">Текущий месяц</span>
-      </div>
-      {rows.map((r) => <PlanFactRow key={r.label} {...r} />)}
-    </div>
-  );
+  return <MonthlyPlanSection />;
 }
 
 // ─── ФИНАНСЫ ──────────────────────────────────────────────────────────────────

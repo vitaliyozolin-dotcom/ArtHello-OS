@@ -1,5 +1,6 @@
 import { Router, type IRouter } from "express";
 import { healthRouter } from "./health.js";
+import { pulsePlanRouter } from "./pulse-plan.js";
 import { branchesRouter } from "./branches.js";
 import { marketingRouter } from "./marketing.js";
 import { financeRouter } from "./finance.js";
@@ -47,6 +48,7 @@ import { paymentsWebRouter } from "./payments-web.js";
 export const apiRouter: IRouter = Router();
 
 apiRouter.use(healthRouter);
+apiRouter.use(pulsePlanRouter);
 apiRouter.use(branchesRouter);
 apiRouter.use(marketingRouter);
 apiRouter.use(financeRouter);

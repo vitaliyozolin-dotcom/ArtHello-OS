@@ -5,6 +5,45 @@
  * AlphaCRM Sync Sandbox API
  * OpenAPI spec version: 0.1.0
  */
+/**
+ * Null means unset or unconfirmed. Receipts are integer kopecks, not accrued revenue. At least one target is required when saving.
+ */
+export interface MonthlyPlanTargets {
+  /**
+     * @minimum 0
+     * @maximum 9007199254740991
+     * @nullable
+     */
+  leads: number | null;
+  /**
+     * @minimum 0
+     * @maximum 9007199254740991
+     * @nullable
+     */
+  students: number | null;
+  /**
+     * @minimum 0
+     * @maximum 9007199254740991
+     * @nullable
+     */
+  payments: number | null;
+  /**
+     * @minimum 0
+     * @maximum 9007199254740991
+     * @nullable
+     */
+  receiptsMinor: number | null;
+}
+
+export interface MonthlyPlan {
+  month: string;
+  /** @minimum 1 */
+  revision: number;
+  targets: MonthlyPlanTargets;
+  updatedAt: string;
+  updatedBy: string;
+}
+
 export interface ImportStatementInput {
   bankName: string;
   fileName?: string;
@@ -3539,6 +3578,27 @@ export interface EvotorCoverageAuditResponse {
   /** @nullable */
   discoveryRaw?: EvotorCoverageAuditResponseDiscoveryRaw;
 }
+
+export type GetMonthlyPlanParams = {
+/**
+ * @pattern ^20[0-9]{2}-(0[1-9]|1[0-2])$
+ */
+month: string;
+};
+
+export type GetMonthlyPlan200 = {
+  month: string;
+  plan: MonthlyPlan | null;
+  facts: MonthlyPlanTargets;
+};
+
+export type SaveMonthlyPlanBody = {
+  /** @pattern ^20[0-9]{2}-(0[1-9]|1[0-2])$ */
+  month: string;
+  /** @minimum 0 */
+  revision: number;
+  targets: MonthlyPlanTargets;
+};
 
 export type GetMarketingLeadsParams = {
 limit?: number;
